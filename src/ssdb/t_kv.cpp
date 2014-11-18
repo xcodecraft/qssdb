@@ -19,8 +19,9 @@ int SSDBImpl::multi_set(const std::vector<Bytes> &kvs, int offset, char log_type
 		}
 		const Bytes &val = *(it + 1);
 		std::string buf = encode_kv_key(key);
-		binlogs->Put(buf, slice(val));
-		binlogs->add_log(log_type, BinlogCommand::KSET, buf);
+        leveldb::Slice val_slice = slice(val);
+		binlogs->Put(buf, val_slice);
+		binlogs->add_log(log_type, BinlogCommand::KSET, buf, val_slice);
 	}
 	leveldb::Status s = binlogs->commit();
 	if(!s.ok()){
@@ -39,7 +40,7 @@ int SSDBImpl::multi_del(const std::vector<Bytes> &keys, int offset, char log_typ
 		const Bytes &key = *it;
 		std::string buf = encode_kv_key(key);
 		binlogs->Delete(buf);
-		binlogs->add_log(log_type, BinlogCommand::KDEL, buf);
+		binlogs->add_log(log_type, BinlogCommand::KDEL, buf, "");
 	}
 	leveldb::Status s = binlogs->commit();
 	if(!s.ok()){
@@ -58,8 +59,9 @@ int SSDBImpl::set(const Bytes &key, const Bytes &val, char log_type){
 	Transaction trans(binlogs);
 
 	std::string buf = encode_kv_key(key);
-	binlogs->Put(buf, slice(val));
-	binlogs->add_log(log_type, BinlogCommand::KSET, buf);
+    leveldb::Slice val_slice = slice(val);
+	binlogs->Put(buf, val_slice);
+	binlogs->add_log(log_type, BinlogCommand::KSET, buf, val_slice);
 	leveldb::Status s = binlogs->commit();
 	if(!s.ok()){
 		log_error("set error: %s", s.ToString().c_str());
@@ -82,8 +84,9 @@ int SSDBImpl::setnx(const Bytes &key, const Bytes &val, char log_type){
 		return 0;
 	}
 	std::string buf = encode_kv_key(key);
-	binlogs->Put(buf, slice(val));
-	binlogs->add_log(log_type, BinlogCommand::KSET, buf);
+    leveldb::Slice val_slice = slice(val);
+	binlogs->Put(buf, val_slice);
+	binlogs->add_log(log_type, BinlogCommand::KSET, buf, val_slice);
 	leveldb::Status s = binlogs->commit();
 	if(!s.ok()){
 		log_error("set error: %s", s.ToString().c_str());
@@ -102,8 +105,9 @@ int SSDBImpl::getset(const Bytes &key, std::string *val, const Bytes &newval, ch
 
 	int found = this->get(key, val);
 	std::string buf = encode_kv_key(key);
-	binlogs->Put(buf, slice(newval));
-	binlogs->add_log(log_type, BinlogCommand::KSET, buf);
+    leveldb::Slice val_slice = slice(newval);
+	binlogs->Put(buf, val_slice);
+	binlogs->add_log(log_type, BinlogCommand::KSET, buf, val_slice);
 	leveldb::Status s = binlogs->commit();
 	if(!s.ok()){
 		log_error("set error: %s", s.ToString().c_str());
@@ -119,7 +123,7 @@ int SSDBImpl::del(const Bytes &key, char log_type){
 	std::string buf = encode_kv_key(key);
 	binlogs->begin();
 	binlogs->Delete(buf);
-	binlogs->add_log(log_type, BinlogCommand::KDEL, buf);
+	binlogs->add_log(log_type, BinlogCommand::KDEL, buf, "");
 	leveldb::Status s = binlogs->commit();
 	if(!s.ok()){
 		log_error("del error: %s", s.ToString().c_str());
@@ -145,8 +149,9 @@ int SSDBImpl::incr(const Bytes &key, int64_t by, int64_t *new_val, char log_type
 	}
 
 	std::string buf = encode_kv_key(key);
-	binlogs->Put(buf, str(*new_val));
-	binlogs->add_log(log_type, BinlogCommand::KSET, buf);
+    std::string new_val_str = str(*new_val);;
+	binlogs->Put(buf, new_val_str);
+	binlogs->add_log(log_type, BinlogCommand::KSET, buf, new_val_str);
 
 	leveldb::Status s = binlogs->commit();
 	if(!s.ok()){
@@ -227,7 +232,7 @@ int SSDBImpl::setbit(const Bytes &key, int bitoffset, int on, char log_type){
 
 	std::string buf = encode_kv_key(key);
 	binlogs->Put(buf, val);
-	binlogs->add_log(log_type, BinlogCommand::KSET, buf);
+	binlogs->add_log(log_type, BinlogCommand::KSET, buf, val);
 	leveldb::Status s = binlogs->commit();
 	if(!s.ok()){
 		log_error("set error: %s", s.ToString().c_str());

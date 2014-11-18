@@ -11,11 +11,13 @@ found in the LICENSE file.
 
 /* Binlog */
 
-Binlog::Binlog(uint64_t seq, char type, char cmd, const leveldb::Slice &key){
+Binlog::Binlog(uint64_t seq, char type, char cmd, const leveldb::Slice &key, const leveldb::Slice &val){
 	buf.append((char *)(&seq), sizeof(uint64_t));
 	buf.push_back(type);
 	buf.push_back(cmd);
 	buf.append(key.data(), key.size());
+    
+    val_buf.append(val.data(), val.size());
 }
 
 uint64_t Binlog::seq() const{
@@ -34,7 +36,34 @@ const Bytes Binlog::key() const{
 	return Bytes(buf.data() + HEADER_LEN, buf.size() - HEADER_LEN);
 }
 
-int Binlog::load(const Bytes &s){
+const Bytes Binlog::val() const{
+    return Bytes(val_buf.data(), val_buf.size()); 
+}
+                                                                                                                         
+// old version repr() => format_key()
+const std::string Binlog::format_key() const {
+    return buf;
+}
+
+// output format: seq(uint64_t) + type(char) + cmd(char) + klen(uint32_t) + key + vlen(uint32_t) + val
+const std::string Binlog::log_data() const {
+    std::string formatData;
+    uint32_t klen = buf.size() - HEADER_LEN;
+    uint32_t vlen = val_buf.size();
+
+    formatData.append(buf.data(), HEADER_LEN);
+    formatData.append((char *)(&klen), sizeof(uint32_t));
+    formatData.append(buf.data() + HEADER_LEN, klen);
+    formatData.append((char *)(&vlen), sizeof(uint32_t));
+    formatData.append(val_buf.data(), vlen);
+
+    return formatData;
+}
+
+                                                                      
+// old version load() => load_format_key(), for Compatible master-slave sync
+// input format: seq(uint64_t) + type(char) + cmd(char) + key;
+int Binlog::load_format_key(const Bytes &s){
 	if(s.size() < HEADER_LEN){
 		return -1;
 	}
@@ -42,7 +71,7 @@ int Binlog::load(const Bytes &s){
 	return 0;
 }
 
-int Binlog::load(const leveldb::Slice &s){
+int Binlog::load_format_key(const leveldb::Slice &s){
 	if(s.size() < HEADER_LEN){
 		return -1;
 	}
@@ -50,12 +79,35 @@ int Binlog::load(const leveldb::Slice &s){
 	return 0;
 }
 
-int Binlog::load(const std::string &s){
+int Binlog::load_format_key(const std::string &s){
 	if(s.size() < HEADER_LEN){
 		return -1;
 	}
 	buf.assign(s.data(), s.size());
 	return 0;
+}
+
+// input format: seq(uint64_t) + type(char) + cmd(char) + klen(uint32_t) + key + vlen(uint32_t) + val
+int Binlog::load_log_data(const leveldb::Slice &s){
+    const char* data = s.data();
+    uint32_t minLen = HEADER_LEN + 2 * sizeof(uint32_t);
+    if (s.size() < minLen) {
+        return -1;
+    }
+    uint32_t klen = *(uint32_t *)(data + HEADER_LEN);
+    if (s.size() < minLen + klen) {
+        return -1;
+    }
+    uint32_t vlen = *(uint32_t *)(data + HEADER_LEN + sizeof(uint32_t) + klen);
+    if (s.size() < minLen + klen + vlen) {
+        return -1;
+    }
+    
+    buf.assign(data, HEADER_LEN);
+    buf.append(data + HEADER_LEN + sizeof(uint32_t), klen);
+
+    val_buf.assign(data + HEADER_LEN + sizeof(uint32_t) + klen + sizeof(uint32_t), vlen);
+    return 0;
 }
 
 std::string Binlog::dumps() const{
@@ -149,8 +201,9 @@ static inline uint64_t decode_seq_key(const leveldb::Slice &key){
 	return seq;
 }
 
-BinlogQueue::BinlogQueue(leveldb::DB *db, bool enabled){
+BinlogQueue::BinlogQueue(leveldb::DB *db, leveldb::DB *binlog_db, bool enabled){
 	this->db = db;
+    this->binlog_db = binlog_db;
 	this->min_seq = 0;
 	this->last_seq = 0;
 	this->tran_seq = 0;
@@ -210,6 +263,7 @@ std::string BinlogQueue::stats() const{
 void BinlogQueue::begin(){
 	tran_seq = last_seq;
 	batch.Clear();
+	binlog_batch.Clear();
 }
 
 void BinlogQueue::rollback(){
@@ -218,29 +272,54 @@ void BinlogQueue::rollback(){
 
 leveldb::Status BinlogQueue::commit(){
 	leveldb::WriteOptions write_opts;
-	leveldb::Status s = db->Write(write_opts, &batch);
+	leveldb::Status s;
+    
+    if (binlog_db) {
+        s = binlog_db->Write(write_opts, &binlog_batch);
+        if(!s.ok()){
+            // FIXME log
+            return s;
+        }
+    }
+
+    s = db->Write(write_opts, &batch);
 	if(s.ok()){
 		last_seq = tran_seq;
 		tran_seq = 0;
-	}
+	} else {
+        //FIXME log
+    }
 	return s;
 }
 
-void BinlogQueue::add_log(char type, char cmd, const leveldb::Slice &key){
+void BinlogQueue::set_enabled(bool enabled){
+   this->enabled = enabled;
+}
+
+void BinlogQueue::set_last_seq(uint64_t seq){
+   this->last_seq = seq;
+}
+
+bool BinlogQueue::is_enabled(){
+    return this->enabled;
+}
+
+void BinlogQueue::add_log(char type, char cmd, const leveldb::Slice &key, const leveldb::Slice &val){
 	if(!enabled){
 		return;
 	}
 	tran_seq ++;
-	Binlog log(tran_seq, type, cmd, key);
-	batch.Put(encode_seq_key(tran_seq), log.repr());
+	Binlog log(tran_seq, type, cmd, key, val);
+	binlog_batch.Put(encode_seq_key(tran_seq), log.log_data());
 }
 
-void BinlogQueue::add_log(char type, char cmd, const std::string &key){
+void BinlogQueue::add_log(char type, char cmd, const std::string &key, const std::string &val){
 	if(!enabled){
 		return;
 	}
-	leveldb::Slice s(key);
-	this->add_log(type, cmd, s);
+	leveldb::Slice k(key);
+	leveldb::Slice v(val);
+	this->add_log(type, cmd, k, v);
 }
 
 // leveldb put
@@ -254,19 +333,22 @@ void BinlogQueue::Delete(const leveldb::Slice& key){
 }
 	
 int BinlogQueue::find_next(uint64_t next_seq, Binlog *log) const{
+    if (!binlog_db) {
+        return -1;
+    }
 	if(this->get(next_seq, log) == 1){
 		return 1;
 	}
 	uint64_t ret = 0;
 	std::string key_str = encode_seq_key(next_seq);
 	leveldb::ReadOptions iterate_options;
-	leveldb::Iterator *it = db->NewIterator(iterate_options);
+	leveldb::Iterator *it = binlog_db->NewIterator(iterate_options);
 	it->Seek(key_str);
 	if(it->Valid()){
 		leveldb::Slice key = it->key();
 		if(decode_seq_key(key) != 0){
 			leveldb::Slice val = it->value();
-			if(log->load(val) == -1){
+			if(log->load_log_data(val) == -1){
 				ret = -1;
 			}else{
 				ret = 1;
@@ -278,10 +360,13 @@ int BinlogQueue::find_next(uint64_t next_seq, Binlog *log) const{
 }
 
 int BinlogQueue::find_last(Binlog *log) const{
+    if (!binlog_db) {
+        return -1;
+    }
 	uint64_t ret = 0;
 	std::string key_str = encode_seq_key(UINT64_MAX);
 	leveldb::ReadOptions iterate_options;
-	leveldb::Iterator *it = db->NewIterator(iterate_options);
+	leveldb::Iterator *it = binlog_db->NewIterator(iterate_options);
 	it->Seek(key_str);
 	if(!it->Valid()){
 		// Iterator::prev requires Valid, so we seek to last
@@ -294,7 +379,7 @@ int BinlogQueue::find_last(Binlog *log) const{
 		leveldb::Slice key = it->key();
 		if(decode_seq_key(key) != 0){
 			leveldb::Slice val = it->value();
-			if(log->load(val) == -1){
+			if(log->load_log_data(val) == -1){
 				ret = -1;
 			}else{
 				ret = 1;
@@ -306,19 +391,25 @@ int BinlogQueue::find_last(Binlog *log) const{
 }
 
 int BinlogQueue::get(uint64_t seq, Binlog *log) const{
+    if (!binlog_db) {
+        return 0;
+    }
 	std::string val;
-	leveldb::Status s = db->Get(leveldb::ReadOptions(), encode_seq_key(seq), &val);
+	leveldb::Status s = binlog_db->Get(leveldb::ReadOptions(), encode_seq_key(seq), &val);
 	if(s.ok()){
-		if(log->load(val) != -1){
+		if(log->load_log_data(val) != -1){
 			return 1;
 		}
 	}
 	return 0;
 }
 
-int BinlogQueue::update(uint64_t seq, char type, char cmd, const std::string &key){
-	Binlog log(seq, type, cmd, key);
-	leveldb::Status s = db->Put(leveldb::WriteOptions(), encode_seq_key(seq), log.repr());
+int BinlogQueue::update(uint64_t seq, char type, char cmd, const std::string &key, const std::string &val){
+    if (!binlog_db) {
+        return -1;
+    }
+	Binlog log(seq, type, cmd, key, val);
+	leveldb::Status s = binlog_db->Put(leveldb::WriteOptions(), encode_seq_key(seq), log.log_data());
 	if(s.ok()){
 		return 0;
 	}
@@ -326,7 +417,10 @@ int BinlogQueue::update(uint64_t seq, char type, char cmd, const std::string &ke
 }
 
 int BinlogQueue::del(uint64_t seq){
-	leveldb::Status s = db->Delete(leveldb::WriteOptions(), encode_seq_key(seq));
+    if (!binlog_db) {
+        return -1;
+    }
+	leveldb::Status s = binlog_db->Delete(leveldb::WriteOptions(), encode_seq_key(seq));
 	if(!s.ok()){
 		return -1;
 	}
@@ -338,12 +432,15 @@ void BinlogQueue::flush(){
 }
 
 int BinlogQueue::del_range(uint64_t start, uint64_t end){
+    if (!binlog_db) {
+        return -1;
+    }
 	while(start <= end){
 		leveldb::WriteBatch batch;
 		for(int count = 0; start <= end && count < 1000; start++, count++){
 			batch.Delete(encode_seq_key(start));
 		}
-		leveldb::Status s = db->Write(leveldb::WriteOptions(), &batch);
+		leveldb::Status s = binlog_db->Write(leveldb::WriteOptions(), &batch);
 		if(!s.ok()){
 			return -1;
 		}
@@ -355,7 +452,7 @@ void* BinlogQueue::log_clean_thread_func(void *arg){
 	BinlogQueue *logs = (BinlogQueue *)arg;
 	
 	while(!logs->thread_quit){
-		if(!logs->db){
+		if(!logs->binlog_db){
 			break;
 		}
 		usleep(100 * 1000);
@@ -398,7 +495,7 @@ void BinlogQueue::merge(){
 			std::map<std::string, uint64_t>::iterator it = key_map.find(key);
 			if(it != key_map.end()){
 				uint64_t seq = it->second;
-				this->update(seq, BinlogType::NOOP, BinlogCommand::NONE, "");
+				this->update(seq, BinlogType::NOOP, BinlogCommand::NONE, "", "");
 				//log_trace("merge update %" PRIu64 " to NOOP", seq);
 				reduce_count ++;
 			}

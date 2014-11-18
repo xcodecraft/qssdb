@@ -235,9 +235,9 @@ void BackendSync::Client::reset(){
 	this->last_seq = 0;
 	this->last_key = "";
 
-	Binlog log(this->last_seq, BinlogType::COPY, BinlogCommand::BEGIN, "");
+	Binlog log(this->last_seq, BinlogType::COPY, BinlogCommand::BEGIN, "", "");
 	log_trace("fd: %d, %s", link->fd(), log.dumps().c_str());
-	link->send(log.repr(), "copy_begin");
+	link->send(log.format_key(), "copy_begin");
 }
 
 void BackendSync::Client::noop(){
@@ -248,9 +248,9 @@ void BackendSync::Client::noop(){
 		seq = this->last_seq;
 		this->last_noop_seq = this->last_seq;
 	}
-	Binlog noop(seq, BinlogType::NOOP, BinlogCommand::NONE, "");
+	Binlog noop(seq, BinlogType::NOOP, BinlogCommand::NONE, "", "");
 	//log_debug("fd: %d, %s", link->fd(), noop.dumps().c_str());
-	link->send(noop.repr());
+	link->send(noop.format_key());
 }
 
 int BackendSync::Client::copy(){
@@ -299,6 +299,7 @@ int BackendSync::Client::copy(){
 		}else if(data_type == DataType::ZSET){
 			cmd = BinlogCommand::ZSET;
 		}else if(data_type == DataType::QUEUE){
+            // FIXME has bug?
 			cmd = BinlogCommand::QPUSH_BACK;
 		}else{
 			continue;
@@ -306,9 +307,9 @@ int BackendSync::Client::copy(){
 		
 		ret = 1;
 		
-		Binlog log(this->last_seq, BinlogType::COPY, cmd, slice(key));
+		Binlog log(this->last_seq, BinlogType::COPY, cmd, slice(key), slice(val));
 		log_trace("fd: %d, %s", link->fd(), log.dumps().c_str());
-		link->send(log.repr(), val);
+		link->send(log.format_key(), val);
 	}
 	return ret;
 
@@ -318,9 +319,9 @@ copy_end:
 	delete this->iter;
 	this->iter = NULL;
 
-	Binlog log(this->last_seq, BinlogType::COPY, BinlogCommand::END, "");
+	Binlog log(this->last_seq, BinlogType::COPY, BinlogCommand::END, "", "");
 	log_trace("fd: %d, %s", link->fd(), log.dumps().c_str());
-	link->send(log.repr(), "copy_end");
+	link->send(log.format_key(), "copy_end");
 	return 1;
 }
 
@@ -329,7 +330,11 @@ int BackendSync::Client::sync(BinlogQueue *logs){
 	while(1){
 		int ret = 0;
 		uint64_t expect_seq = this->last_seq + 1;
-		if(this->status == Client::COPY && this->last_seq == 0){
+		if(this->status == Client::COPY){
+            if (this->last_seq > 0) {
+                return 0;
+            }
+            Locking l(&logs->mutex);
 			ret = logs->find_last(&log);
 		}else{
 			ret = logs->find_next(expect_seq, &log);
@@ -389,6 +394,7 @@ int BackendSync::Client::sync(BinlogQueue *logs){
 		case BinlogCommand::QSET:
 		case BinlogCommand::QPUSH_BACK:
 		case BinlogCommand::QPUSH_FRONT:
+            /*
 			ret = backend->ssdb->raw_get(log.key(), &val);
 			if(ret == -1){
 				log_error("fd: %d, raw_get error!", link->fd());
@@ -399,6 +405,9 @@ int BackendSync::Client::sync(BinlogQueue *logs){
 				log_trace("fd: %d, %s", link->fd(), log.dumps().c_str());
 				link->send(log.repr(), val);
 			}
+            */
+			log_trace("fd: %d, %s", link->fd(), log.dumps().c_str());
+            link->send(log.format_key(), log.val());
 			break;
 		case BinlogCommand::KDEL:
 		case BinlogCommand::HDEL:
@@ -406,7 +415,7 @@ int BackendSync::Client::sync(BinlogQueue *logs){
 		case BinlogCommand::QPOP_BACK:
 		case BinlogCommand::QPOP_FRONT:
 			log_trace("fd: %d, %s", link->fd(), log.dumps().c_str());
-			link->send(log.repr());
+			link->send(log.format_key());
 			break;
 	}
 	return 1;

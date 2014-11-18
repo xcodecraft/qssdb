@@ -209,14 +209,16 @@ static int hset_one(SSDBImpl *ssdb, const Bytes &name, const Bytes &key, const B
 	std::string dbval;
 	if(ssdb->hget(name, key, &dbval) == 0){ // not found
 		std::string hkey = encode_hash_key(name, key);
-		ssdb->binlogs->Put(hkey, slice(val));
-		ssdb->binlogs->add_log(log_type, BinlogCommand::HSET, hkey);
+        leveldb::Slice val_slice = slice(val);
+		ssdb->binlogs->Put(hkey, val_slice);
+		ssdb->binlogs->add_log(log_type, BinlogCommand::HSET, hkey, val_slice);
 		ret = 1;
 	}else{
 		if(dbval != val){
 			std::string hkey = encode_hash_key(name, key);
-			ssdb->binlogs->Put(hkey, slice(val));
-			ssdb->binlogs->add_log(log_type, BinlogCommand::HSET, hkey);
+            leveldb::Slice val_slice = slice(val);
+			ssdb->binlogs->Put(hkey, val_slice);
+			ssdb->binlogs->add_log(log_type, BinlogCommand::HSET, hkey, val_slice);
 		}
 		ret = 0;
 	}
@@ -239,7 +241,7 @@ static int hdel_one(SSDBImpl *ssdb, const Bytes &name, const Bytes &key, char lo
 
 	std::string hkey = encode_hash_key(name, key);
 	ssdb->binlogs->Delete(hkey);
-	ssdb->binlogs->add_log(log_type, BinlogCommand::HDEL, hkey);
+	ssdb->binlogs->add_log(log_type, BinlogCommand::HDEL, hkey, "");
 	
 	return 1;
 }

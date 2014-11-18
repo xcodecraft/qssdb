@@ -19,20 +19,26 @@ found in the LICENSE file.
 class Binlog{
 private:
 	std::string buf;
+	std::string val_buf;
 	static const unsigned int HEADER_LEN = sizeof(uint64_t) + 2;
 public:
 	Binlog(){}
-	Binlog(uint64_t seq, char type, char cmd, const leveldb::Slice &key);
+	Binlog(uint64_t seq, char type, char cmd, const leveldb::Slice &key, const leveldb::Slice &val);
 		
-	int load(const Bytes &s);
-	int load(const leveldb::Slice &s);
-	int load(const std::string &s);
+    // original function is load() 
+	int load_format_key(const Bytes &s);
+	int load_format_key(const leveldb::Slice &s);
+	int load_format_key(const std::string &s);
+
+	int load_log_data(const leveldb::Slice &s);
 
 	uint64_t seq() const;
 	char type() const;
 	char cmd() const;
 	const Bytes key() const;
+	const Bytes val() const;
 
+/*
 	const char* data() const{
 		return buf.data();
 	}
@@ -42,6 +48,10 @@ public:
 	const std::string repr() const{
 		return this->buf;
 	}
+*/
+    const std::string format_key() const;
+    const std::string log_data() const;  
+
 	std::string dumps() const;
 };
 
@@ -54,11 +64,13 @@ private:
 	static const int LOG_QUEUE_SIZE  = 10000;
 #endif
 	leveldb::DB *db;
+	leveldb::DB *binlog_db;
 	uint64_t min_seq;
 	uint64_t last_seq;
 	uint64_t tran_seq;
 	int capacity;
 	leveldb::WriteBatch batch;
+	leveldb::WriteBatch binlog_batch;
 
 	volatile bool thread_quit;
 	static void* log_clean_thread_func(void *arg);
@@ -71,7 +83,7 @@ private:
 public:
 	Mutex mutex;
 
-	BinlogQueue(leveldb::DB *db, bool enabled=true);
+	BinlogQueue(leveldb::DB *db, leveldb::DB *binlog_db, bool enabled=true);
 	~BinlogQueue();
 	void begin();
 	void rollback();
@@ -80,11 +92,15 @@ public:
 	void Put(const leveldb::Slice& key, const leveldb::Slice& value);
 	// leveldb delete
 	void Delete(const leveldb::Slice& key);
-	void add_log(char type, char cmd, const leveldb::Slice &key);
-	void add_log(char type, char cmd, const std::string &key);
+	void add_log(char type, char cmd, const leveldb::Slice &key, const leveldb::Slice &val);
+	void add_log(char type, char cmd, const std::string &key, const std::string &val);
+
+    void set_enabled(bool enabled);
+    bool is_enabled();
+    void set_last_seq(uint64_t seq);
 		
 	int get(uint64_t seq, Binlog *log) const;
-	int update(uint64_t seq, char type, char cmd, const std::string &key);
+	int update(uint64_t seq, char type, char cmd, const std::string &key, const std::string &val);
 		
 	void flush();
 		

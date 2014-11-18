@@ -70,6 +70,7 @@ int main(int argc, char **argv){
 			fprintf(stderr, "could not open meta db: %s\n", meta_db_dir.c_str());
 			exit(1);
 		}
+
 	}
 
 	net = NetworkServer::init(*conf);

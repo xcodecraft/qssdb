@@ -65,6 +65,12 @@ public:
 		
 	void set_id(const std::string &id);
 	std::string stats() const;
+    std::string get_master_ip() const{
+        return master_ip;
+    }
+    int get_master_port(){
+        return master_port;
+    }
 };
 
 #endif

@@ -324,7 +324,7 @@ static int zset_one(SSDBImpl *ssdb, const Bytes &name, const Bytes &key, const B
 		// update zset
 		k0 = encode_zset_key(name, key);
 		ssdb->binlogs->Put(k0, new_score);
-		ssdb->binlogs->add_log(log_type, BinlogCommand::ZSET, k0);
+		ssdb->binlogs->add_log(log_type, BinlogCommand::ZSET, k0, new_score);
 
 		return found? 0 : 1;
 	}
@@ -354,7 +354,7 @@ static int zdel_one(SSDBImpl *ssdb, const Bytes &name, const Bytes &key, char lo
 	// delete zset
 	k0 = encode_zset_key(name, key);
 	ssdb->binlogs->Delete(k0);
-	ssdb->binlogs->add_log(log_type, BinlogCommand::ZDEL, k0);
+	ssdb->binlogs->add_log(log_type, BinlogCommand::ZDEL, k0, "");
 
 	return 1;
 }

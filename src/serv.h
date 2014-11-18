@@ -34,6 +34,7 @@ public:
 	BackendSync *backend_sync;
 	ExpirationHandler *expiration;
 	std::vector<Slave *> slaves;
+    std::map<std::string,std::string> addrs;
 
 	SSDBServer(SSDB *ssdb, SSDB *meta, const Config &conf, NetworkServer *net);
 	~SSDBServer();
@@ -42,8 +43,12 @@ public:
 	int get_kv_range(std::string *s, std::string *e);
 	bool in_kv_range(const std::string &key);
 	bool in_kv_range(const Bytes &key);
+
+    int create_slave(std::string &ip, int port, std::string &type, std::string &id);
+    void destroy_all_slaves();
 };
 
+size_t memory_used();
 
 #define CHECK_KEY_RANGE(n) do{ \
 		if(req.size() > n){ \

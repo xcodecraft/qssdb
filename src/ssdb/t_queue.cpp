@@ -139,7 +139,7 @@ int SSDBImpl::qset_by_seq(const Bytes &name, uint64_t seq, const Bytes &item, ch
 	}
 
 	std::string buf = encode_qitem_key(name, seq);
-	binlogs->add_log(log_type, BinlogCommand::QSET, buf);
+	binlogs->add_log(log_type, BinlogCommand::QSET, buf, slice(item));
 
 	leveldb::Status s = binlogs->commit();
 	if(!s.ok()){
@@ -183,7 +183,7 @@ int SSDBImpl::qset(const Bytes &name, int64_t index, const Bytes &item, char log
 
 	//log_info("qset %s %" PRIu64 "", hexmem(name.data(), name.size()).c_str(), seq);
 	std::string buf = encode_qitem_key(name, seq);
-	binlogs->add_log(log_type, BinlogCommand::QSET, buf);
+	binlogs->add_log(log_type, BinlogCommand::QSET, buf, slice(item));
 	
 	leveldb::Status s = binlogs->commit();
 	if(!s.ok()){
@@ -231,9 +231,9 @@ int64_t SSDBImpl::_qpush(const Bytes &name, const Bytes &item, uint64_t front_or
 
 	std::string buf = encode_qitem_key(name, seq);
 	if(front_or_back_seq == QFRONT_SEQ){
-		binlogs->add_log(log_type, BinlogCommand::QPUSH_FRONT, buf);
+		binlogs->add_log(log_type, BinlogCommand::QPUSH_FRONT, buf, slice(item));
 	}else{
-		binlogs->add_log(log_type, BinlogCommand::QPUSH_BACK, buf);
+		binlogs->add_log(log_type, BinlogCommand::QPUSH_BACK, buf, slice(item));
 	}
 	
 	// update size
@@ -286,9 +286,9 @@ int SSDBImpl::_qpop(const Bytes &name, std::string *item, uint64_t front_or_back
 	}
 
 	if(front_or_back_seq == QFRONT_SEQ){
-		binlogs->add_log(log_type, BinlogCommand::QPOP_FRONT, name.String());
+		binlogs->add_log(log_type, BinlogCommand::QPOP_FRONT, name.String(), "");
 	}else{
-		binlogs->add_log(log_type, BinlogCommand::QPOP_BACK, name.String());
+		binlogs->add_log(log_type, BinlogCommand::QPOP_BACK, name.String(), "");
 	}
 
 	// update size

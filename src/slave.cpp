@@ -269,7 +269,7 @@ err:
 
 int Slave::proc(const std::vector<Bytes> &req){
 	Binlog log;
-	if(log.load(req[0]) == -1){
+	if(log.load_format_key(req[0]) == -1){
 		log_error("invalid binlog!");
 		return 0;
 	}
@@ -331,12 +331,25 @@ int Slave::proc_copy(const Binlog &log, const std::vector<Bytes> &req){
 		case BinlogCommand::END:
 			log_info("copy end, copy_count: %" PRIu64 ", last_seq: %" PRIu64 ", seq: %" PRIu64,
 				copy_count, this->last_seq, log.seq());
+            if (!this->is_mirror) { // no master
+                ssdb->get_binlogs()->update(this->last_seq, BinlogType::NOOP, BinlogCommand::NONE, "", "");
+                ssdb->get_binlogs()->set_last_seq(this->last_seq);
+            }
 			this->last_key = "";
 			this->save_status();
 			break;
 		default:
-			return proc_sync(log, req);
-			break;
+            if (this->is_mirror) {
+                // if master, don't set no_log
+                return proc_sync(log, req);
+            } else {
+                // FIXME it has bug when there are multi replications
+                bool enabled = ssdb->get_binlogs()->is_enabled();
+                ssdb->get_binlogs()->set_enabled(true);
+                int result = proc_sync(log, req);
+                ssdb->get_binlogs()->set_enabled(enabled);
+                return result;
+            }
 	}
 	return 0;
 }

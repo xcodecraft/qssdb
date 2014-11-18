@@ -17,6 +17,7 @@ found in the LICENSE file.
 
 SSDBImpl::SSDBImpl(){
 	db = NULL;
+    binlog_db = NULL;
 	binlogs = NULL;
 }
 
@@ -26,6 +27,9 @@ SSDBImpl::~SSDBImpl(){
 	}
 	if(db){
 		delete db;
+	}
+	if(binlog_db){
+		delete binlog_db;
 	}
 	if(options.block_cache){
 		delete options.block_cache;
@@ -54,10 +58,35 @@ SSDB* SSDB::open(const Options &opt, const std::string &dir){
 
 	status = leveldb::DB::Open(ssdb->options, dir, &ssdb->db);
 	if(!status.ok()){
-		log_error("open db failed");
+		log_error("open db %s failed", dir.c_str());
 		goto err;
 	}
-	ssdb->binlogs = new BinlogQueue(ssdb->db, opt.binlog);
+    
+    if (opt.binlog) { // open binlog_db
+        std::string binlog_dir;
+        int size = dir.size();
+        while(size > 0) {
+            if (dir.at(size - 1) != '/') {
+                break;
+            }
+            size --;
+        }
+        binlog_dir.append(dir.substr(0, size));
+        binlog_dir.append("_binlog");
+
+        leveldb::Options options;
+        options.create_if_missing = true;
+        options.compression = ssdb->options.compression;
+        options.compaction_speed = ssdb->options.compaction_speed;
+        // FIXME lru cache
+        status = leveldb::DB::Open(options, binlog_dir, &ssdb->binlog_db);
+        if(!status.ok()){
+            log_error("open db %s failed", binlog_dir.c_str());
+            goto err;
+        }
+    }
+
+	ssdb->binlogs = new BinlogQueue(ssdb->db, ssdb->binlog_db, opt.binlog);
 
 	return ssdb;
 err:
@@ -305,4 +334,8 @@ int SSDBImpl::key_range(std::vector<std::string> *keys){
 	keys->push_back(qend);
 	
 	return ret;
+}
+
+BinlogQueue *SSDBImpl::get_binlogs() {
+    return binlogs;
 }
