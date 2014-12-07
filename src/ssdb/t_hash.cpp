@@ -191,6 +191,41 @@ int SSDBImpl::hrlist(const Bytes &name_s, const Bytes &name_e, uint64_t limit,
 	return 0;
 }
 
+/*
+ * just for support command: smove source dest member
+ */
+int SSDBImpl::smove(const Bytes &source, const Bytes &dest, const Bytes &member, char log_type){
+	Transaction trans(binlogs);
+
+	int ret = hdel_one(this, source, member, log_type);
+    if (ret <= 0) { // error or not exist
+        return ret;
+    }
+
+    if(incr_hsize(this, source, -ret) == -1){
+        return -1;
+    }
+
+	ret = hset_one(this, dest, member, "", log_type);
+    if (ret < 0) { // error
+        return ret;
+    }
+
+    if(ret > 0){ // add success
+        if(incr_hsize(this, dest, ret) == -1){
+            return -1;
+        }
+    }
+
+    leveldb::Status s = binlogs->commit();
+    if(!s.ok()){
+        return -1;
+    }
+
+	return 1;
+}
+
+
 // returns the number of newly added items
 static int hset_one(SSDBImpl *ssdb, const Bytes &name, const Bytes &key, const Bytes &val, char log_type){
 	if(name.empty() || key.empty()){
@@ -248,12 +283,19 @@ static int hdel_one(SSDBImpl *ssdb, const Bytes &name, const Bytes &key, char lo
 
 static int incr_hsize(SSDBImpl *ssdb, const Bytes &name, int64_t incr){
 	int64_t size = ssdb->hsize(name);
+    bool hash_not_exist = (size == 0) ? true : false;
 	size += incr;
 	std::string size_key = encode_hsize_key(name);
 	if(size == 0){
 		ssdb->binlogs->Delete(size_key);
+        ssdb->hash_count --;
+        ssdb->update_count ++;
 	}else{
 		ssdb->binlogs->Put(size_key, leveldb::Slice((char *)&size, sizeof(int64_t)));
+        if (hash_not_exist) {
+            ssdb->hash_count ++;
+            ssdb->update_count ++;
+        }
 	}
 	return 0;
 }

@@ -26,6 +26,7 @@ int proc_getset(NetworkServer *net, Link *link, const Request &req, Response *re
 
 	std::string val;
 	int ret = serv->ssdb->getset(req[1], &val, req[2]);
+    serv->save_kv_stats();
 	resp->reply_get(ret, &val);
 	return 0;
 }
@@ -39,6 +40,7 @@ int proc_set(NetworkServer *net, Link *link, const Request &req, Response *resp)
 	if(ret == -1){
 		resp->push_back("error");
 	}else{
+        serv->save_kv_stats();
 		resp->push_back("ok");
 		resp->push_back("1");
 	}
@@ -51,7 +53,20 @@ int proc_setnx(NetworkServer *net, Link *link, const Request &req, Response *res
 	CHECK_KEY_RANGE(1);
 
 	int ret = serv->ssdb->setnx(req[1], req[2]);
+    serv->save_kv_stats();
 	resp->reply_bool(ret);
+	return 0;
+}
+
+int proc_msetnx(NetworkServer *net, Link *link, const Request &req, Response *resp){
+	SSDBServer *serv = (SSDBServer *)net->data;
+	if(req.size() < 3 || req.size() % 2 != 1){
+		resp->push_back("client_error");
+	}else{
+		int ret = serv->ssdb->msetnx(req, 1);
+        serv->save_kv_stats();
+		resp->reply_int(0, ret);
+	}
 	return 0;
 }
 
@@ -63,6 +78,7 @@ int proc_setx(NetworkServer *net, Link *link, const Request &req, Response *resp
 	Locking l(&serv->expiration->mutex);
 	int ret;
 	ret = serv->ssdb->set(req[1], req[2]);
+    serv->save_kv_stats();
 	if(ret == -1){
 		resp->push_back("error");
 		return 0;
@@ -148,6 +164,7 @@ int proc_multi_set(NetworkServer *net, Link *link, const Request &req, Response 
 		resp->push_back("client_error");
 	}else{
 		int ret = serv->ssdb->multi_set(req, 1);
+        serv->save_kv_stats();
 		resp->reply_int(0, ret);
 	}
 	return 0;
@@ -237,6 +254,10 @@ int proc_rscan(NetworkServer *net, Link *link, const Request &req, Response *res
 	return 0;
 }
 
+int proc_redis_scan(NetworkServer *net, Link *link, const Request &req, Response *resp){
+    return proc_redis_scan(net, link, req, resp, REDIS_SCAN);
+}
+
 int proc_keys(NetworkServer *net, Link *link, const Request &req, Response *resp){
 	SSDBServer *serv = (SSDBServer *)net->data;
 	CHECK_NUM_PARAMS(4);
@@ -255,17 +276,18 @@ int proc_keys(NetworkServer *net, Link *link, const Request &req, Response *resp
 }
 
 // dir := +1|-1
-static int _incr(SSDB *ssdb, const Request &req, Response *resp, int dir){
+static int _incr(SSDBServer *serv, const Request &req, Response *resp, int dir){
 	CHECK_NUM_PARAMS(2);
 	int64_t by = 1;
 	if(req.size() > 2){
 		by = req[2].Int64();
 	}
 	int64_t new_val;
-	int ret = ssdb->incr(req[1], dir * by, &new_val);
+	int ret = serv->ssdb->incr(req[1], dir * by, &new_val);
 	if(ret == 0){
 		resp->reply_status(-1, "value is not an integer or out of range");
 	}else{
+        serv->save_kv_stats();
 		resp->reply_int(ret, new_val);
 	}
 	return 0;
@@ -274,13 +296,13 @@ static int _incr(SSDB *ssdb, const Request &req, Response *resp, int dir){
 int proc_incr(NetworkServer *net, Link *link, const Request &req, Response *resp){
 	SSDBServer *serv = (SSDBServer *)net->data;
 	CHECK_KEY_RANGE(1);
-	return _incr(serv->ssdb, req, resp, 1);
+	return _incr(serv, req, resp, 1);
 }
 
 int proc_decr(NetworkServer *net, Link *link, const Request &req, Response *resp){
 	SSDBServer *serv = (SSDBServer *)net->data;
 	CHECK_KEY_RANGE(1);
-	return _incr(serv->ssdb, req, resp, -1);
+	return _incr(serv, req, resp, -1);
 }
 
 int proc_getbit(NetworkServer *net, Link *link, const Request &req, Response *resp){
@@ -307,6 +329,7 @@ int proc_setbit(NetworkServer *net, Link *link, const Request &req, Response *re
 	}
 	int on = req[3].Int();
 	int ret = serv->ssdb->setbit(key, offset, on);
+    serv->save_kv_stats();
 	resp->reply_bool(ret);
 	return 0;
 }
@@ -415,6 +438,24 @@ int proc_getrange(NetworkServer *net, Link *link, const Request &req, Response *
 		resp->push_back("ok");
 		resp->push_back(str);
 	}
+	return 0;
+}
+
+int proc_setrange(NetworkServer *net, Link *link, const Request &req, Response *resp){
+	SSDBServer *serv = (SSDBServer *)net->data;
+	CHECK_NUM_PARAMS(4);
+	CHECK_KEY_RANGE(1);
+
+	const Bytes &key = req[1];
+	int offset = req[2].Int();
+	if(offset < 0){
+		resp->push_back("client_error");
+		resp->push_back("offset is not an integer or out of range");
+		return 0;
+	}
+	int ret = serv->ssdb->setrange(key, offset, req[3]);
+    serv->save_kv_stats();
+	resp->reply_int(ret, ret);
 	return 0;
 }
 

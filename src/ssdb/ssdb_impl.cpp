@@ -37,6 +37,12 @@ SSDBImpl::~SSDBImpl(){
 	if(options.filter_policy){
 		delete options.filter_policy;
 	}
+	if(binlog_options.block_cache){
+		delete binlog_options.block_cache;
+	}
+	if(binlog_options.filter_policy){
+		delete binlog_options.filter_policy;
+	}
 }
 
 SSDB* SSDB::open(const Options &opt, const std::string &dir){
@@ -72,14 +78,16 @@ SSDB* SSDB::open(const Options &opt, const std::string &dir){
             size --;
         }
         binlog_dir.append(dir.substr(0, size));
-        binlog_dir.append("_binlog");
+        binlog_dir.append("_binlog"); 
 
-        leveldb::Options options;
-        options.create_if_missing = true;
-        options.compression = ssdb->options.compression;
-        options.compaction_speed = ssdb->options.compaction_speed;
-        // FIXME lru cache
-        status = leveldb::DB::Open(options, binlog_dir, &ssdb->binlog_db);
+        ssdb->binlog_options.create_if_missing = true;
+        ssdb->binlog_options.compression = leveldb::kSnappyCompression; // default compression
+        ssdb->binlog_options.compaction_speed = ssdb->options.compaction_speed;   
+        ssdb->binlog_options.max_open_files = ssdb->options.max_open_files > 50 ? 50 : ssdb->options.max_open_files; // max open 50 files for binlog
+        ssdb->binlog_options.block_cache = leveldb::NewLRUCache(10 * 1048576); // 10MB LRU cache
+        ssdb->binlog_options.block_size = ssdb->options.block_size * 1024;
+        ssdb->binlog_options.write_buffer_size = opt.write_buffer_size * 1024 * 1024;
+        status = leveldb::DB::Open(ssdb->binlog_options, binlog_dir, &ssdb->binlog_db);
         if(!status.ok()){
             log_error("open db %s failed", binlog_dir.c_str());
             goto err;
@@ -158,9 +166,15 @@ int SSDBImpl::raw_get(const Bytes &key, std::string *val){
 	return 1;
 }
 
-uint64_t SSDBImpl::size(){
+uint64_t SSDBImpl::size(std::string start, std::string end){
 	std::string s = "A";
 	std::string e(1, 'z' + 1);
+    if (!start.empty()) {
+        s = start;
+    }
+    if (!end.empty()) {
+        e = end;
+    }
 	leveldb::Range ranges[1];
 	ranges[0] = leveldb::Range(s, e);
 	uint64_t sizes[1];

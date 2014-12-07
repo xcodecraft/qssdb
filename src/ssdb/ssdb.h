@@ -27,7 +27,7 @@ public:
 	virtual Iterator* rev_iterator(const std::string &start, const std::string &end, uint64_t limit) = 0;
 
 	//void flushdb();
-	virtual uint64_t size() = 0;
+	virtual uint64_t size(std::string start="", std::string end="") = 0;
 	virtual std::vector<std::string> info() = 0;
 	virtual void compact() = 0;
 	virtual int key_range(std::vector<std::string> *keys) = 0;
@@ -43,6 +43,7 @@ public:
 
 	virtual int set(const Bytes &key, const Bytes &val, char log_type=BinlogType::SYNC) = 0;
 	virtual int setnx(const Bytes &key, const Bytes &val, char log_type=BinlogType::SYNC) = 0;
+	virtual int msetnx(const std::vector<Bytes> &kvs, int offset=0, char log_type=BinlogType::SYNC) = 0;
 	virtual int del(const Bytes &key, char log_type=BinlogType::SYNC) = 0;
 	// -1: error, 1: ok, 0: value is not an integer or out of range
 	virtual int incr(const Bytes &key, int64_t by, int64_t *new_val, char log_type=BinlogType::SYNC) = 0;
@@ -50,6 +51,7 @@ public:
 	virtual int multi_del(const std::vector<Bytes> &keys, int offset=0, char log_type=BinlogType::SYNC) = 0;
 	virtual int setbit(const Bytes &key, int bitoffset, int on, char log_type=BinlogType::SYNC) = 0;
 	virtual int getbit(const Bytes &key, int bitoffset) = 0;
+	virtual int setrange(const Bytes &key, int offset, const Bytes &val, char log_type=BinlogType::SYNC) = 0;
 	
 	virtual int get(const Bytes &key, std::string *val) = 0;
 	virtual int getset(const Bytes &key, std::string *val, const Bytes &newval, char log_type=BinlogType::SYNC) = 0;
@@ -63,6 +65,7 @@ public:
 	virtual int hdel(const Bytes &name, const Bytes &key, char log_type=BinlogType::SYNC) = 0;
 	// -1: error, 1: ok, 0: value is not an integer or out of range
 	virtual int hincr(const Bytes &name, const Bytes &key, int64_t by, int64_t *new_val, char log_type=BinlogType::SYNC) = 0;
+    virtual int smove(const Bytes &source, const Bytes &dest, const Bytes &member, char log_type=BinlogType::SYNC) = 0;
 
 	virtual int64_t hsize(const Bytes &name) = 0;
 	virtual int hget(const Bytes &name, const Bytes &key, std::string *val) = 0;
@@ -110,9 +113,12 @@ public:
 	// @return -1: error, other: the new length of the queue
 	virtual int64_t qpush_front(const Bytes &name, const Bytes &item, char log_type=BinlogType::SYNC) = 0;
 	virtual int64_t qpush_back(const Bytes &name, const Bytes &item, char log_type=BinlogType::SYNC) = 0;
+	virtual int64_t qpushx_front(const Bytes &name, const Bytes &item, char log_type=BinlogType::SYNC) = 0;
+	virtual int64_t qpushx_back(const Bytes &name, const Bytes &item, char log_type=BinlogType::SYNC) = 0;
 	// @return 0: empty queue, 1: item popped, -1: error
 	virtual int qpop_front(const Bytes &name, std::string *item, char log_type=BinlogType::SYNC) = 0;
 	virtual int qpop_back(const Bytes &name, std::string *item, char log_type=BinlogType::SYNC) = 0;
+    virtual int qbpop_fpush(const Bytes &source, const Bytes &dest, std::string *item, char log_type=BinlogType::SYNC) = 0;
 	virtual int qfix(const Bytes &name) = 0;
 	virtual int qlist(const Bytes &name_s, const Bytes &name_e, uint64_t limit,
 			std::vector<std::string> *list) = 0;

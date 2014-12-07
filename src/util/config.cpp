@@ -171,7 +171,7 @@ Config* Config::add_child(const char *key, const char *val, int lineno){
 	return c;
 }
 
-const Config* Config::find_child(const char *key) const{
+Config* Config::find_child(const char *key) const{
 	int i = (int)children.size()-1;
 	for(; i >= 0; i--){
 		if(children[i]->key == key){
@@ -205,6 +205,40 @@ const Config* Config::get(const char *key) const{
 		}
 	}
 	return conf;
+}
+
+int Config::del(const char *key){
+	char path[CONFIG_MAX_LINE];
+    Config *conf = this;
+
+	snprintf(path, CONFIG_MAX_LINE, "%s", key);
+
+	char *f, *fs; /* field, field seperator */
+	f = fs = path;
+	while(conf){
+		switch(*fs++){
+			case '.':
+			case '/':
+				*(fs - 1) = '\0';
+				conf = conf->find_child(f);
+				f = fs;
+				break;
+			case '\0':
+			    for(std::vector<Config *>::iterator it = conf->children.begin(); it != conf->children.end();){
+                    Config *c = *it;
+                    if(c->key != "slaveof"){
+                        it ++;
+                    } else {
+                        delete c;
+                        conf->children.erase(it);
+                    }
+                }
+                return 0;
+			default:
+				break;
+		}
+	}
+	return 0;
 }
 
 int Config::num() const{

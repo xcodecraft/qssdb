@@ -41,7 +41,7 @@ static int QFRONT = 2;
 static int QBACK  = 3;
 
 static inline
-int proc_qpush_func(NetworkServer *net, Link *link, const Request &req, Response *resp, int front_or_back){
+int proc_qpush_func(NetworkServer *net, Link *link, const Request &req, Response *resp, int front_or_back, bool need_exist=false){
 	SSDBServer *serv = (SSDBServer *)net->data;
 	CHECK_NUM_PARAMS(3);
 
@@ -51,15 +51,24 @@ int proc_qpush_func(NetworkServer *net, Link *link, const Request &req, Response
 	for(; it != req.end(); it += 1){
 		const Bytes &item = *it;
 		if(front_or_back == QFRONT){
-			size = serv->ssdb->qpush_front(req[1], item);
+            if (need_exist) {
+			    size = serv->ssdb->qpushx_front(req[1], item);
+            } else {
+			    size = serv->ssdb->qpush_front(req[1], item);
+            }
 		}else{
-			size = serv->ssdb->qpush_back(req[1], item);
+            if (need_exist) {
+			    size = serv->ssdb->qpushx_back(req[1], item);
+            } else {
+			    size = serv->ssdb->qpush_back(req[1], item);
+            }
 		}
 		if(size == -1){
 			resp->push_back("error");
 			return 0;
 		}
 	}
+    serv->save_kv_stats();
 	resp->reply_int(0, size);
 	return 0;
 }
@@ -72,10 +81,30 @@ int proc_qpush_back(NetworkServer *net, Link *link, const Request &req, Response
 	return proc_qpush_func(net, link, req, resp, QBACK);
 }
 
+int proc_qpushx_front(NetworkServer *net, Link *link, const Request &req, Response *resp){
+	return proc_qpush_func(net, link, req, resp, QFRONT, true);
+}
+
+int proc_qpushx_back(NetworkServer *net, Link *link, const Request &req, Response *resp){
+	return proc_qpush_func(net, link, req, resp, QBACK, true);
+}
+
 int proc_qpush(NetworkServer *net, Link *link, const Request &req, Response *resp){
 	return proc_qpush_func(net, link, req, resp, QBACK);
 }
 
+int proc_qbpop_fpush(NetworkServer *net, Link *link, const Request &req, Response *resp){
+	SSDBServer *serv = (SSDBServer *)net->data;
+	CHECK_NUM_PARAMS(3);
+	
+	std::string item;
+    int ret = serv->ssdb->qbpop_fpush(req[1], req[2], &item);
+
+    serv->save_kv_stats();
+    resp->reply_get(ret, &item);
+
+	return 0;
+}
 
 static inline
 int proc_qpop_func(NetworkServer *net, Link *link, const Request &req, Response *resp, int front_or_back){
@@ -113,6 +142,7 @@ int proc_qpop_func(NetworkServer *net, Link *link, const Request &req, Response 
 		}
 	}
 
+    serv->save_kv_stats();
 	return 0;
 }
 
@@ -151,6 +181,7 @@ int proc_qtrim_func(NetworkServer *net, Link *link, const Request &req, Response
 			break;
 		}
 	}
+    serv->save_kv_stats();
 	resp->reply_int(0, count);
 
 	return 0;
@@ -215,6 +246,7 @@ int proc_qclear(NetworkServer *net, Link *link, const Request &req, Response *re
 		}
 		count += 1;
 	}
+    serv->save_kv_stats();
 	resp->reply_int(0, count);
 	return 0;
 }
@@ -272,6 +304,7 @@ int proc_qset(NetworkServer *net, Link *link, const Request &req, Response *resp
 		resp->push_back("error");
 		resp->push_back("index out of range");
 	}else{
+        serv->save_kv_stats();
 		resp->push_back("ok");
 	}
 	return 0;

@@ -77,6 +77,7 @@ int proc_multi_hset(NetworkServer *net, Link *link, const Request &req, Response
 				num += ret;
 			}
 		}
+        serv->save_kv_stats();
 		resp->reply_int(0, num);
 	}
 	return 0;
@@ -99,6 +100,7 @@ int proc_multi_hdel(NetworkServer *net, Link *link, const Request &req, Response
 			num += ret;
 		}
 	}
+    serv->save_kv_stats();
 	resp->reply_int(0, num);
 	return 0;
 }
@@ -137,6 +139,7 @@ int proc_hset(NetworkServer *net, Link *link, const Request &req, Response *resp
 	SSDBServer *serv = (SSDBServer *)net->data;
 
 	int ret = serv->ssdb->hset(req[1], req[2], req[3]);
+    serv->save_kv_stats();
 	resp->reply_bool(ret);
 	return 0;
 }
@@ -156,6 +159,7 @@ int proc_hdel(NetworkServer *net, Link *link, const Request &req, Response *resp
 	SSDBServer *serv = (SSDBServer *)net->data;
 
 	int ret = serv->ssdb->hdel(req[1], req[2]);
+    serv->save_kv_stats();
 	resp->reply_bool(ret);
 	return 0;
 }
@@ -185,6 +189,7 @@ int proc_hclear(NetworkServer *net, Link *link, const Request &req, Response *re
 		}
 		count += num;
 	}
+    serv->save_kv_stats();
 	resp->reply_int(0, count);
 
 	return 0;
@@ -217,6 +222,10 @@ int proc_hscan(NetworkServer *net, Link *link, const Request &req, Response *res
 	}
 	delete it;
 	return 0;
+}
+
+int proc_redis_hscan(NetworkServer *net, Link *link, const Request &req, Response *resp){
+    return proc_redis_scan(net, link, req, resp, REDIS_HSCAN);
 }
 
 int proc_hrscan(NetworkServer *net, Link *link, const Request &req, Response *resp){
@@ -288,7 +297,7 @@ int proc_hrlist(NetworkServer *net, Link *link, const Request &req, Response *re
 }
 
 // dir := +1|-1
-static int _hincr(SSDB *ssdb, const Request &req, Response *resp, int dir){
+static int _hincr(SSDBServer *serv, const Request &req, Response *resp, int dir){
 	CHECK_NUM_PARAMS(3);
 
 	int64_t by = 1;
@@ -296,10 +305,11 @@ static int _hincr(SSDB *ssdb, const Request &req, Response *resp, int dir){
 		by = req[3].Int64();
 	}
 	int64_t new_val;
-	int ret = ssdb->hincr(req[1], req[2], dir * by, &new_val);
+	int ret = serv->ssdb->hincr(req[1], req[2], dir * by, &new_val);
 	if(ret == 0){
 		resp->reply_status(-1, "value is not an integer or out of range");
 	}else{
+        serv->save_kv_stats();
 		resp->reply_int(ret, new_val);
 	}
 	return 0;
@@ -307,12 +317,12 @@ static int _hincr(SSDB *ssdb, const Request &req, Response *resp, int dir){
 
 int proc_hincr(NetworkServer *net, Link *link, const Request &req, Response *resp){
 	SSDBServer *serv = (SSDBServer *)net->data;
-	return _hincr(serv->ssdb, req, resp, 1);
+	return _hincr(serv, req, resp, 1);
 }
 
 int proc_hdecr(NetworkServer *net, Link *link, const Request &req, Response *resp){
 	SSDBServer *serv = (SSDBServer *)net->data;
-	return _hincr(serv->ssdb, req, resp, -1);
+	return _hincr(serv, req, resp, -1);
 }
 
 

@@ -361,12 +361,19 @@ static int zdel_one(SSDBImpl *ssdb, const Bytes &name, const Bytes &key, char lo
 
 static int incr_zsize(SSDBImpl *ssdb, const Bytes &name, int64_t incr){
 	int64_t size = ssdb->zsize(name);
+    bool zset_not_exist = (size == 0) ? true : false;
 	size += incr;
 	std::string size_key = encode_zsize_key(name);
 	if(size == 0){
 		ssdb->binlogs->Delete(size_key);
+        ssdb->zset_count --;
+        ssdb->update_count ++;
 	}else{
 		ssdb->binlogs->Put(size_key, leveldb::Slice((char *)&size, sizeof(int64_t)));
+        if (zset_not_exist) {
+            ssdb->zset_count ++;
+            ssdb->update_count ++;
+        }
 	}
 	return 0;
 }

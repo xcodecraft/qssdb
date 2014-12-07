@@ -18,12 +18,12 @@ found in the LICENSE file.
 
 class Link{
 	private:
+		RedisLink *redis;
 		int sock;
 		bool noblock_;
 		bool error_;
 		std::vector<Bytes> recv_data;
 
-		RedisLink *redis;
 	public:
 		char remote_ip[INET_ADDRSTRLEN];
 		int remote_port;
@@ -37,6 +37,13 @@ class Link{
 		
 		double create_time;
 		double active_time;
+
+        int ref_count;
+
+        /* for redis scan */
+        uint64_t cursor;
+        std::string cursor_key;
+        std::string cursor_score; // for zset struct
 
 		Link(bool is_server=false);
 		~Link();
@@ -56,6 +63,12 @@ class Link{
 		void mark_error(){
 			error_ = true;
 		}
+        void ref(){
+            ref_count ++;
+        }
+        void unRef(){
+            ref_count --;
+        }
 
 		static Link* connect(const char *ip, int port);
 		static Link* listen(const char *ip, int port);
@@ -101,6 +114,10 @@ class Link{
 		const std::vector<Bytes>* request(const Bytes &s1, const Bytes &s2, const Bytes &s3);
 		const std::vector<Bytes>* request(const Bytes &s1, const Bytes &s2, const Bytes &s3, const Bytes &s4);
 		const std::vector<Bytes>* request(const Bytes &s1, const Bytes &s2, const Bytes &s3, const Bytes &s4, const Bytes &s5);
+
+        std::string get_cursor_key(uint64_t cursor);
+        std::string get_cursor_score(uint64_t cursor);
+        void reset_cursor(std::string cursor_key, std::string cursor_score, uint64_t cursor);
 };
 
 #endif

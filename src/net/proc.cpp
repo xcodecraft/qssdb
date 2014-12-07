@@ -56,3 +56,61 @@ Command* ProcMap::get_proc(const Bytes &str){
 	}
 	return NULL;
 }
+
+// FIXME 待性能优化，pattern被多次解析
+/*
+ * support pattern:
+ *      string 
+ *      string*  (prefix match)
+ *      *string  (suffix match)
+ *      *string* (fuzzy match)
+ *
+ *  Return:
+ *      true is match, false is not match.
+ */
+bool is_pattern_match(const std::string &source, std::string pattern) {
+    if (pattern.empty()) {
+        return false;
+    }
+
+    bool is_match_all = true;
+    for (int i = 0; i < pattern.size(); i ++) {
+        if (pattern.at(i) != '*') {
+            is_match_all = false;
+            break;
+        }
+    }
+
+    if (is_match_all) {
+        return true;
+    }
+
+    bool prefix_not_pattern = (pattern.at(0) != '*');
+    bool suffix_not_pattern = (pattern.at(pattern.size()-1) != '*');
+
+    std::string::size_type startpos = 0;  
+    while (startpos!= std::string::npos){
+        startpos = pattern.find('*');
+        if(startpos != std::string::npos){ 
+          pattern.replace(startpos,1,"");
+        }
+    } 
+
+    if (source.size() < pattern.size()) {
+        return false;
+    }
+
+    if (prefix_not_pattern && suffix_not_pattern) {
+        return source.compare(pattern) == 0;
+    }
+
+    if (prefix_not_pattern) {
+        return pattern.compare(source.substr(0,pattern.size())) == 0;
+    }
+
+    if (suffix_not_pattern) {
+        return pattern.compare(source.substr(source.size()-pattern.size(),pattern.size())) == 0;
+    }
+
+    return source.find(pattern) != std::string::npos;
+}

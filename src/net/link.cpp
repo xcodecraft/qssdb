@@ -29,6 +29,12 @@ Link::Link(bool is_server){
 	remote_ip[0] = '\0';
 	remote_port = -1;
 	auth = false;
+    ref_count = 0;
+
+    /* just for support redis scan command */
+    cursor = 0;
+    cursor_key = "";
+    cursor_score = "";
 	
 	if(is_server){
 		input = output = NULL;
@@ -172,10 +178,14 @@ Link* Link::accept(){
 	link->keepalive(true);
 	inet_ntop(AF_INET, &addr.sin_addr, link->remote_ip, sizeof(link->remote_ip));
 	link->remote_port = ntohs(addr.sin_port);
+    
 	return link;
 }
 
 int Link::read(){
+    if (error_) {
+        return -1;
+    }
 	if(input->total() == ZERO_BUFFER_SIZE){
 		input->grow();
 	}
@@ -212,6 +222,9 @@ int Link::read(){
 }
 
 int Link::write(){
+    if (error_) {
+        return -1;
+    }
 	if(output->total() == ZERO_BUFFER_SIZE){
 		output->grow();
 	}
@@ -491,6 +504,20 @@ const std::vector<Bytes>* Link::request(const Bytes &s1, const Bytes &s2, const 
 		return NULL;
 	}
 	return this->response();
+}
+
+std::string Link::get_cursor_key(uint64_t cursor) {
+    return (cursor == this->cursor) ? this->cursor_key : "";
+}
+
+std::string Link::get_cursor_score(uint64_t cursor) {
+    return (cursor == this->cursor) ? this->cursor_score : "";
+}
+
+void Link::reset_cursor(std::string cursor_key, std::string cursor_score, uint64_t cursor) {
+    this->cursor = cursor;
+    this->cursor_key = cursor_key;
+    this->cursor_score = cursor_score;
 }
 
 #if 0

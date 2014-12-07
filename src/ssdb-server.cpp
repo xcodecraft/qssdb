@@ -75,7 +75,7 @@ int main(int argc, char **argv){
 
 	net = NetworkServer::init(*conf);
 
-	SSDBServer *ss = new SSDBServer(data_db, meta_db, *conf, net);
+	SSDBServer *ss = new SSDBServer(data_db, meta_db, conf, app_args.conf_file, net);
 
 	write_pid();
 	log_info("ssdb server started.");

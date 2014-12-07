@@ -193,9 +193,23 @@ int SSDBImpl::qset(const Bytes &name, int64_t index, const Bytes &item, char log
 	return 1;
 }
 
-int64_t SSDBImpl::_qpush(const Bytes &name, const Bytes &item, uint64_t front_or_back_seq, char log_type){
+int64_t SSDBImpl::_qpush(const Bytes &name, const Bytes &item, uint64_t front_or_back_seq, bool need_exist, char log_type){
 	Transaction trans(binlogs);
 
+    int size = _qpush_uncommit(name, item, front_or_back_seq, need_exist, log_type);
+    if (size <= 0) {
+        return size;
+    }
+
+	leveldb::Status s = binlogs->commit();
+	if(!s.ok()){
+		log_error("Write error!");
+		return -1;
+	}
+    return size;
+}
+
+int64_t SSDBImpl::_qpush_uncommit(const Bytes &name, const Bytes &item, uint64_t front_or_back_seq, bool need_exist, char log_type){
 	int ret;
 	// generate seq
 	uint64_t seq;
@@ -205,12 +219,17 @@ int64_t SSDBImpl::_qpush(const Bytes &name, const Bytes &item, uint64_t front_or
 	}
 	// update front and/or back
 	if(ret == 0){
+        if (need_exist) {
+            return 0;
+        }
 		seq = QITEM_SEQ_INIT;
 		ret = qset_one(this, name, QFRONT_SEQ, Bytes(&seq, sizeof(seq)));
 		if(ret == -1){
 			return -1;
 		}
 		ret = qset_one(this, name, QBACK_SEQ, Bytes(&seq, sizeof(seq)));
+        queue_count ++;
+        update_count ++;
 	}else{
 		seq += (front_or_back_seq == QFRONT_SEQ)? -1 : +1;
 		ret = qset_one(this, name, front_or_back_seq, Bytes(&seq, sizeof(seq)));
@@ -241,26 +260,42 @@ int64_t SSDBImpl::_qpush(const Bytes &name, const Bytes &item, uint64_t front_or
 	if(size == -1){
 		return -1;
 	}
+	return size;
+}
+
+int64_t SSDBImpl::qpush_front(const Bytes &name, const Bytes &item, char log_type){
+	return _qpush(name, item, QFRONT_SEQ, false, log_type);
+}
+
+int64_t SSDBImpl::qpush_back(const Bytes &name, const Bytes &item, char log_type){
+	return _qpush(name, item, QBACK_SEQ, false, log_type);
+}
+
+int64_t SSDBImpl::qpushx_front(const Bytes &name, const Bytes &item, char log_type){
+	return _qpush(name, item, QFRONT_SEQ, true, log_type);
+}
+
+int64_t SSDBImpl::qpushx_back(const Bytes &name, const Bytes &item, char log_type){
+	return _qpush(name, item, QBACK_SEQ, true, log_type);
+}
+
+int SSDBImpl::_qpop(const Bytes &name, std::string *item, uint64_t front_or_back_seq, char log_type){
+	Transaction trans(binlogs);
+	
+    int ret = _qpop_uncommit(name, item, front_or_back_seq, log_type);
+    if (ret <= 0) {
+        return ret;
+    }
 
 	leveldb::Status s = binlogs->commit();
 	if(!s.ok()){
 		log_error("Write error!");
 		return -1;
 	}
-	return size;
+    return 1;
 }
 
-int64_t SSDBImpl::qpush_front(const Bytes &name, const Bytes &item, char log_type){
-	return _qpush(name, item, QFRONT_SEQ, log_type);
-}
-
-int64_t SSDBImpl::qpush_back(const Bytes &name, const Bytes &item, char log_type){
-	return _qpush(name, item, QBACK_SEQ, log_type);
-}
-
-int SSDBImpl::_qpop(const Bytes &name, std::string *item, uint64_t front_or_back_seq, char log_type){
-	Transaction trans(binlogs);
-	
+int SSDBImpl::_qpop_uncommit(const Bytes &name, std::string *item, uint64_t front_or_back_seq, char log_type){
 	int ret;
 	uint64_t seq;
 	ret = qget_uint64(this->db, name, front_or_back_seq, &seq);
@@ -306,12 +341,6 @@ int SSDBImpl::_qpop(const Bytes &name, std::string *item, uint64_t front_or_back
 			return -1;
 		}
 	}
-		
-	leveldb::Status s = binlogs->commit();
-	if(!s.ok()){
-		log_error("Write error!");
-		return -1;
-	}
 	return 1;
 }
 
@@ -322,6 +351,28 @@ int SSDBImpl::qpop_front(const Bytes &name, std::string *item, char log_type){
 
 int SSDBImpl::qpop_back(const Bytes &name, std::string *item, char log_type){
 	return _qpop(name, item, QBACK_SEQ, log_type);
+}
+
+// FIXME 这步的细节还可以再推敲下
+int SSDBImpl::qbpop_fpush(const Bytes &source, const Bytes &dest, std::string *item, char log_type){
+	Transaction trans(binlogs);
+
+    int ret = _qpop_uncommit(source, item, QBACK_SEQ, log_type);
+    if (ret <= 0) {
+        return ret;
+    }
+    
+    ret = _qpush_uncommit(dest, *item, QFRONT_SEQ, false, log_type);
+    if (ret <= 0) {
+        return ret;
+    }
+
+	leveldb::Status s = binlogs->commit();
+	if(!s.ok()){
+		log_error("Write error!");
+		return -1;
+	}
+	return 1;
 }
 
 static void get_qnames(Iterator *it, std::vector<std::string> *list){

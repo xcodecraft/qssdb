@@ -235,7 +235,6 @@ void dump(const void *p, int size, const char *msg = NULL){
 	printf("%s>\n", s.c_str());
 }
 
-
 static inline
 std::string str(const char *s){
 	return std::string(s);

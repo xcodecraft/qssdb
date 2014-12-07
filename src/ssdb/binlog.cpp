@@ -41,20 +41,22 @@ const Bytes Binlog::val() const{
 }
                                                                                                                          
 // old version repr() => format_key()
+// 因为binlog的数据格式和官方版本的数据格式不一致，为了规避后续merge的风险，所以直接废弃老的方式
 const std::string Binlog::format_key() const {
     return buf;
 }
 
-// output format: seq(uint64_t) + type(char) + cmd(char) + klen(uint32_t) + key + vlen(uint32_t) + val
+// output format: version(char) + seq(uint64_t) + type(char) + cmd(char) + klen(uint32_t) + vlen(uint32_t) + key + val
 const std::string Binlog::log_data() const {
     std::string formatData;
     uint32_t klen = buf.size() - HEADER_LEN;
     uint32_t vlen = val_buf.size();
 
+    formatData.push_back(BINLOG_VERSION); 
     formatData.append(buf.data(), HEADER_LEN);
     formatData.append((char *)(&klen), sizeof(uint32_t));
-    formatData.append(buf.data() + HEADER_LEN, klen);
     formatData.append((char *)(&vlen), sizeof(uint32_t));
+    formatData.append(buf.data() + HEADER_LEN, klen);
     formatData.append(val_buf.data(), vlen);
 
     return formatData;
@@ -87,26 +89,29 @@ int Binlog::load_format_key(const std::string &s){
 	return 0;
 }
 
-// input format: seq(uint64_t) + type(char) + cmd(char) + klen(uint32_t) + key + vlen(uint32_t) + val
+// input format: version(char) + seq(uint64_t) + type(char) + cmd(char) + klen(uint32_t) + vlen(uint32_t) + key + val
+// 注：buf 的变量存储的数据格式保持了和官网一致, 新扩展的val放到val_buf
 int Binlog::load_log_data(const leveldb::Slice &s){
     const char* data = s.data();
-    uint32_t minLen = HEADER_LEN + 2 * sizeof(uint32_t);
+    // 1 => version(char), 2 * sizeof(uint32_t) => key_size(uint32_t) + val_size(uint32_t);
+    // HEADER_LEN = seq(uint64_t) + type(char) + cmd(char)
+    const uint32_t VERSION_LEN = 1;
+    const uint32_t new_header_len = VERSION_LEN + HEADER_LEN;
+    uint32_t minLen = new_header_len + 2 * sizeof(uint32_t); 
     if (s.size() < minLen) {
         return -1;
     }
-    uint32_t klen = *(uint32_t *)(data + HEADER_LEN);
-    if (s.size() < minLen + klen) {
-        return -1;
-    }
-    uint32_t vlen = *(uint32_t *)(data + HEADER_LEN + sizeof(uint32_t) + klen);
+    uint32_t klen = *(uint32_t *)(data + new_header_len);
+    uint32_t vlen = *(uint32_t *)(data + new_header_len + sizeof(uint32_t));
     if (s.size() < minLen + klen + vlen) {
         return -1;
     }
     
-    buf.assign(data, HEADER_LEN);
-    buf.append(data + HEADER_LEN + sizeof(uint32_t), klen);
+    buf.assign(data + VERSION_LEN, HEADER_LEN);
+    buf.append(data + new_header_len + 2 * sizeof(uint32_t), klen);
 
-    val_buf.assign(data + HEADER_LEN + sizeof(uint32_t) + klen + sizeof(uint32_t), vlen);
+    val_buf.assign(data + new_header_len + 2 * sizeof(uint32_t) + klen, vlen);
+
     return 0;
 }
 
@@ -277,7 +282,7 @@ leveldb::Status BinlogQueue::commit(){
     if (binlog_db) {
         s = binlog_db->Write(write_opts, &binlog_batch);
         if(!s.ok()){
-            // FIXME log
+            log_warn("commit binlog failed. last_seq: %" PRIu64 ", tran_seq: %" PRIu64 "", last_seq, tran_seq);
             return s;
         }
     }
@@ -287,7 +292,7 @@ leveldb::Status BinlogQueue::commit(){
 		last_seq = tran_seq;
 		tran_seq = 0;
 	} else {
-        //FIXME log
+        log_warn("commit data failed. last_seq: %" PRIu64 ", tran_seq: %" PRIu64 "", last_seq, tran_seq);
     }
 	return s;
 }

@@ -30,6 +30,7 @@ enum STRATEGY{
 	STRATEGY_ZINCRBY,
 	STRATEGY_REMRANGEBYRANK,
 	STRATEGY_REMRANGEBYSCORE,
+	STRATEGY_SCAN,
 	STRATEGY_NULL
 };
 
@@ -51,6 +52,7 @@ static RedisCommand_raw cmds_raw[] = {
 	{STRATEGY_AUTO, "getset",	"getset",		REPLY_BULK},
 	{STRATEGY_AUTO, "set",		"set",			REPLY_STATUS},
 	{STRATEGY_AUTO, "setnx",	"setnx",		REPLY_INT},
+	{STRATEGY_AUTO, "msetnx",	"msetnx",		REPLY_INT},
 	{STRATEGY_AUTO, "exists",	"exists",		REPLY_INT},
 	{STRATEGY_AUTO, "incr",		"incr",			REPLY_INT},
 	{STRATEGY_AUTO, "decr",		"decr",			REPLY_INT},
@@ -62,6 +64,8 @@ static RedisCommand_raw cmds_raw[] = {
 	{STRATEGY_AUTO, "bitcount",	"redis_bitcount",		REPLY_INT},
 	{STRATEGY_AUTO, "substr",	"getrange",		REPLY_BULK},
 	{STRATEGY_AUTO, "getrange",	"getrange",		REPLY_BULK},
+	{STRATEGY_AUTO, "setrange",	"setrange",		REPLY_BULK},
+	{STRATEGY_SCAN, "scan",	"redis_scan",		REPLY_MULTI_BULK},
 
 	{STRATEGY_AUTO, "hset",		"hset",			REPLY_INT},
 	{STRATEGY_AUTO, "hget",		"hget",			REPLY_BULK},
@@ -86,6 +90,8 @@ static RedisCommand_raw cmds_raw[] = {
 	{STRATEGY_AUTO, "zcount",	"zcount",		REPLY_INT},
 	{STRATEGY_REMRANGEBYRANK, "zremrangebyrank",	"zremrangebyrank",		REPLY_INT},
 	{STRATEGY_REMRANGEBYSCORE, "zremrangebyscore",	"zremrangebyscore",		REPLY_INT},
+	{STRATEGY_AUTO,     "zinterstore",	"zinterstore",	REPLY_INT},
+	{STRATEGY_AUTO,     "zunionstore",	"zunionstore",	REPLY_INT},
 	
 	/////////////////////////////////////
 	{STRATEGY_MGET, "mget",		"multi_get",	REPLY_MULTI_BULK},
@@ -94,6 +100,7 @@ static RedisCommand_raw cmds_raw[] = {
 	{STRATEGY_HGETALL,	"hgetall",		"hgetall",		REPLY_MULTI_BULK},
 	{STRATEGY_HKEYS,	"hkeys", 		"hkeys", 		REPLY_MULTI_BULK},
 	{STRATEGY_HVALS,	"hvals", 		"hvals", 		REPLY_MULTI_BULK},
+	{STRATEGY_SCAN,     "hscan",	    "redis_hscan",	REPLY_MULTI_BULK},
 	{STRATEGY_SETEX,	"setex",		"setx", 		REPLY_STATUS},
 	{STRATEGY_ZRANGE,	"zrange",		"zrange",		REPLY_MULTI_BULK},
 	{STRATEGY_ZREVRANGE,"zrevrange",	"zrrange",		REPLY_MULTI_BULK},
@@ -101,11 +108,29 @@ static RedisCommand_raw cmds_raw[] = {
 	{STRATEGY_ZINCRBY,	"zincrby",		"zincr", 		REPLY_BULK},
 	{STRATEGY_ZRANGEBYSCORE,	"zrangebyscore",	"zscan",	REPLY_MULTI_BULK},
 	{STRATEGY_ZREVRANGEBYSCORE,	"zrevrangebyscore",	"zrscan",	REPLY_MULTI_BULK},
+	{STRATEGY_SCAN,     "zscan",	    "redis_zscan",	REPLY_MULTI_BULK},
+
+	{STRATEGY_AUTO,     "sadd",		    "sadd",		    REPLY_INT},
+	{STRATEGY_AUTO,     "sismember",	"sismember",	REPLY_INT},
+	{STRATEGY_AUTO,     "srem",		    "srem",		    REPLY_INT},
+	{STRATEGY_AUTO,     "scard",		"scard",		REPLY_INT},
+	{STRATEGY_AUTO,	    "smembers",		"smembers",		REPLY_MULTI_BULK},
+	{STRATEGY_AUTO,     "smove",		"smove",		REPLY_INT},
+	{STRATEGY_SCAN,     "sscan",	    "redis_sscan",	REPLY_MULTI_BULK},
+	{STRATEGY_AUTO,     "sinter",	    "sinter",	    REPLY_MULTI_BULK},
+	{STRATEGY_AUTO,     "sunion",	    "sunion",	    REPLY_MULTI_BULK},
+	{STRATEGY_AUTO,     "sdiff",	    "sdiff",	    REPLY_MULTI_BULK},
+	{STRATEGY_AUTO,     "sinterstore",	"sinterstore",	REPLY_INT},
+	{STRATEGY_AUTO,     "sunionstore",	"sunionstore",	REPLY_INT},
+	{STRATEGY_AUTO,     "sdiffstore",	"sdiffstore",	REPLY_INT},
 
 	{STRATEGY_AUTO,		"lpush",		"qpush_front", 		REPLY_INT},
 	{STRATEGY_AUTO,		"rpush",		"qpush_back", 		REPLY_INT},
+	{STRATEGY_AUTO,		"lpushx",		"qpushx_front", 	REPLY_INT},
+	{STRATEGY_AUTO,		"rpushx",		"qpushx_back", 		REPLY_INT},
 	{STRATEGY_AUTO,		"lpop",			"qpop_front", 		REPLY_BULK},
 	{STRATEGY_AUTO,		"rpop",			"qpop_back", 		REPLY_BULK},
+	{STRATEGY_AUTO,		"rpoplpush",	"qbpop_fpush", 		REPLY_BULK},
 	{STRATEGY_AUTO, 	"llen",			"qsize",			REPLY_INT},
 	{STRATEGY_AUTO, 	"lsize",		"qsize",			REPLY_INT},
 	{STRATEGY_AUTO,		"lindex",		"qget", 			REPLY_BULK},
@@ -464,6 +489,23 @@ int RedisLink::send_resp(Buffer *output, const std::vector<std::string> &resp){
 	}
 	
 	if(req_desc->reply_type == REPLY_MULTI_BULK){
+        if(this->req_desc->strategy == STRATEGY_SCAN) {
+			char buf[32];
+			output->append("*2\r\n");
+			snprintf(buf, sizeof(buf), "$%ld\r\n", resp[1].size());
+			output->append(buf);
+			output->append(resp[1].data(), resp[1].size());
+			output->append("\r\n");
+			snprintf(buf, sizeof(buf), "*%ld\r\n", resp.size() - 2);
+			output->append(buf);
+            for (int i = 2; i < resp.size(); i ++) {
+                snprintf(buf, sizeof(buf), "$%ld\r\n", resp[i].size());
+                output->append(buf);
+                output->append(resp[i].data(), resp[i].size());
+			    output->append("\r\n");
+            }
+            return 0;
+        }
 		bool withscores = true;
 		if(req_desc->strategy == STRATEGY_ZRANGE || req_desc->strategy == STRATEGY_ZREVRANGE){
 			if(recv_string.size() < 5 || recv_string[4] != "withscores"){
@@ -561,3 +603,4 @@ int RedisLink::parse_req(Buffer *input){
 	recv_bytes.clear();
 	return 0;
 }
+

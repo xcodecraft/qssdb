@@ -385,7 +385,6 @@ int BackendSync::Client::sync(BinlogQueue *logs){
 		break;
 	}
 
-	int ret = 0;
 	std::string val;
 	switch(log.cmd()){
 		case BinlogCommand::KSET:

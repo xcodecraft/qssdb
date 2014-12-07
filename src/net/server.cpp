@@ -43,6 +43,7 @@ NetworkServer::NetworkServer(){
 	//conf = NULL;
 	serv_link = NULL;
 	link_count = 0;
+    max_connections = INT_MAX;
 
 	fdes = new Fdevents();
 	ip_filter = new IpFilter();
@@ -127,6 +128,13 @@ NetworkServer* NetworkServer::init(const Config &conf){
 					const char *ip = (*it)->str();
 					log_info("    deny %s", ip);
 					serv->ip_filter->add_deny(ip);
+				}
+				if((*it)->key == "max_connections"){
+					int max_connections = (*it)->num();
+					log_info("    max_connections %d", max_connections);
+                    if (max_connections > 0) {
+                        serv->max_connections = max_connections;
+                    }
 				}
 			}
 		}
@@ -225,8 +233,10 @@ void NetworkServer::serve(){
 				}
 				if(proc_result(&job, &ready_list) == PROC_ERROR){
 					//
-				}
+                }
 			}else{
+	            Link *link = (Link *)fde->data.ptr;
+                link->ref();
 				proc_client_event(fde, &ready_list);
 			}
 		}
@@ -234,18 +244,14 @@ void NetworkServer::serve(){
 		for(it = ready_list.begin(); it != ready_list.end(); it ++){
 			Link *link = *it;
 			if(link->error()){
-				this->link_count --;
-				fdes->del(link->fd());
-				delete link;
+                destroy_link(link);
 				continue;
 			}
 
 			const Request *req = link->recv();
 			if(req == NULL){
 				log_warn("fd: %d, link parse error, delete link", link->fd());
-				this->link_count --;
-				fdes->del(link->fd());
-				delete link;
+                destroy_link(link);
 				continue;
 			}
 			if(req->empty()){
@@ -265,12 +271,16 @@ void NetworkServer::serve(){
 			if(job.result == PROC_BACKEND){
 				fdes->del(link->fd());
 				this->link_count --;
+                char remote_ip_port[32];
+                snprintf(remote_ip_port, 32, "%s:%d", link->remote_ip, link->remote_port);
+                this->link_map.erase(remote_ip_port);
+                // don't delete link
 				continue;
 			}
 			
 			if(proc_result(&job, &ready_list_2) == PROC_ERROR){
 				//
-			}
+            }
 		} // end foreach ready link
 	}
 }
@@ -286,12 +296,32 @@ Link* NetworkServer::accept_link(){
 		delete link;
 		return NULL;
 	}
+    if ((this->link_count >= this->max_connections) && strcmp(link->remote_ip, "127.0.0.1") != 0) {
+		log_debug("connection is over the limit. current %d max %d", this->link_count, this->max_connections);
+		delete link;
+        return NULL;
+    }
 				
 	link->nodelay();
 	link->noblock();
 	link->create_time = millitime();
 	link->active_time = link->create_time;
+
+    char remote_ip_port[32];
+    snprintf(remote_ip_port, 32, "%s:%d", link->remote_ip, link->remote_port);
+    this->link_map[remote_ip_port] = link;
+
 	return link;
+}
+
+void NetworkServer::destroy_link(Link *link){
+	this->link_count --;
+	this->fdes->del(link->fd());
+
+    char remote_ip_port[32];
+    snprintf(remote_ip_port, 32, "%s:%d", link->remote_ip, link->remote_port);
+    this->link_map.erase(remote_ip_port);
+	delete link;
 }
 
 int NetworkServer::proc_result(ProcJob *job, ready_list_t *ready_list){
@@ -307,6 +337,10 @@ int NetworkServer::proc_result(ProcJob *job, ready_list_t *ready_list){
 		log_info("fd: %d, proc error, delete link", link->fd());
 		goto proc_err;
 	}
+    if(link->error()){
+		log_debug("fd: %d, link error, delete link", link->fd());
+		goto proc_err;
+    }
 	
 	len = link->write();
 	//log_debug("write: %d", len);
@@ -320,6 +354,7 @@ int NetworkServer::proc_result(ProcJob *job, ready_list_t *ready_list){
 	}
 	if(link->input->empty()){
 		fdes->set(link->fd(), FDEVENT_IN, 1, link);
+        link->unRef();
 	}else{
 		fdes->clr(link->fd(), FDEVENT_IN);
 		ready_list->push_back(link);
@@ -327,9 +362,7 @@ int NetworkServer::proc_result(ProcJob *job, ready_list_t *ready_list){
 	return PROC_OK;
 
 proc_err:
-	this->link_count --;
-	fdes->del(link->fd());
-	delete link;
+    destroy_link(link);
 	return PROC_ERROR;
 }
 

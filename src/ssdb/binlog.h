@@ -21,6 +21,7 @@ private:
 	std::string buf;
 	std::string val_buf;
 	static const unsigned int HEADER_LEN = sizeof(uint64_t) + 2;
+    static const char BINLOG_VERSION = 0x81; // 1000 0001
 public:
 	Binlog(){}
 	Binlog(uint64_t seq, char type, char cmd, const leveldb::Slice &key, const leveldb::Slice &val);

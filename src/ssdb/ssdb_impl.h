@@ -31,10 +31,23 @@ private:
 	leveldb::DB* db;
 	leveldb::DB* binlog_db; 
 	leveldb::Options options;
+	leveldb::Options binlog_options;
 	
 	SSDBImpl();
 public:
 	BinlogQueue *binlogs;
+
+    /* for stats */
+    /* k-v start */
+    // not care del command, just care set command
+    uint64_t    kv_size; // isn't the precise size, just the total update size of k-v struct.
+    uint64_t    kv_count; // isn't the precise count, just the total update count of k-v.
+    /* k-v end */
+    uint64_t    hash_count;
+    uint64_t    queue_count;
+    uint64_t    zset_count;
+    uint64_t    update_count; 
+    /* for stats */
 	
 	virtual ~SSDBImpl();
 
@@ -43,7 +56,7 @@ public:
 	virtual Iterator* rev_iterator(const std::string &start, const std::string &end, uint64_t limit);
 
 	//void flushdb();
-	virtual uint64_t size();
+	virtual uint64_t size(std::string start="", std::string end="");
 	virtual std::vector<std::string> info();
 	virtual void compact();
 	virtual int key_range(std::vector<std::string> *keys);
@@ -59,6 +72,7 @@ public:
 
 	virtual int set(const Bytes &key, const Bytes &val, char log_type=BinlogType::SYNC);
 	virtual int setnx(const Bytes &key, const Bytes &val, char log_type=BinlogType::SYNC);
+	virtual int msetnx(const std::vector<Bytes> &kvs, int offset=0, char log_type=BinlogType::SYNC);
 	virtual int del(const Bytes &key, char log_type=BinlogType::SYNC);
 	// -1: error, 1: ok, 0: value is not an integer or out of range
 	virtual int incr(const Bytes &key, int64_t by, int64_t *new_val, char log_type=BinlogType::SYNC);
@@ -66,6 +80,7 @@ public:
 	virtual int multi_del(const std::vector<Bytes> &keys, int offset=0, char log_type=BinlogType::SYNC);
 	virtual int setbit(const Bytes &key, int bitoffset, int on, char log_type=BinlogType::SYNC);
 	virtual int getbit(const Bytes &key, int bitoffset);
+	virtual int setrange(const Bytes &key, int offset, const Bytes &val, char log_type=BinlogType::SYNC);
 	
 	virtual int get(const Bytes &key, std::string *val);
 	virtual int getset(const Bytes &key, std::string *val, const Bytes &newval, char log_type=BinlogType::SYNC);
@@ -81,6 +96,7 @@ public:
 	virtual int hincr(const Bytes &name, const Bytes &key, int64_t by, int64_t *new_val, char log_type=BinlogType::SYNC);
 	//int multi_hset(const Bytes &name, const std::vector<Bytes> &kvs, int offset=0, char log_type=BinlogType::SYNC);
 	//int multi_hdel(const Bytes &name, const std::vector<Bytes> &keys, int offset=0, char log_type=BinlogType::SYNC);
+    virtual int smove(const Bytes &source, const Bytes &dest, const Bytes &member, char log_type=BinlogType::SYNC);
 
 	virtual int64_t hsize(const Bytes &name);
 	virtual int hget(const Bytes &name, const Bytes &key, std::string *val);
@@ -130,9 +146,12 @@ public:
 	// @return -1: error, other: the new length of the queue
 	virtual int64_t qpush_front(const Bytes &name, const Bytes &item, char log_type=BinlogType::SYNC);
 	virtual int64_t qpush_back(const Bytes &name, const Bytes &item, char log_type=BinlogType::SYNC);
+	virtual int64_t qpushx_front(const Bytes &name, const Bytes &item, char log_type=BinlogType::SYNC);
+	virtual int64_t qpushx_back(const Bytes &name, const Bytes &item, char log_type=BinlogType::SYNC);
 	// @return 0: empty queue, 1: item popped, -1: error
 	virtual int qpop_front(const Bytes &name, std::string *item, char log_type=BinlogType::SYNC);
 	virtual int qpop_back(const Bytes &name, std::string *item, char log_type=BinlogType::SYNC);
+    virtual int qbpop_fpush(const Bytes &source, const Bytes &dest, std::string *item, char log_type=BinlogType::SYNC);
 	virtual int qfix(const Bytes &name);
 	virtual int qlist(const Bytes &name_s, const Bytes &name_e, uint64_t limit,
 			std::vector<std::string> *list);
@@ -147,8 +166,10 @@ public:
     virtual BinlogQueue *get_binlogs();
 
 private:
-	int64_t _qpush(const Bytes &name, const Bytes &item, uint64_t front_or_back_seq, char log_type=BinlogType::SYNC);
+	int64_t _qpush(const Bytes &name, const Bytes &item, uint64_t front_or_back_seq, bool need_exist, char log_type=BinlogType::SYNC);
 	int _qpop(const Bytes &name, std::string *item, uint64_t front_or_back_seq, char log_type=BinlogType::SYNC);
+	int64_t _qpush_uncommit(const Bytes &name, const Bytes &item, uint64_t front_or_back_seq, bool need_exist, char log_type=BinlogType::SYNC);
+	int _qpop_uncommit(const Bytes &name, std::string *item, uint64_t front_or_back_seq, char log_type=BinlogType::SYNC);
 };
 
 #endif

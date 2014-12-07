@@ -18,10 +18,18 @@ class NetworkServer;
 #define PROC_THREAD     1
 #define PROC_BACKEND	100
 
+#define REDIS_SCAN      0
+#define REDIS_SSCAN     1
+#define REDIS_HSCAN     2
+#define REDIS_ZSCAN     3
+
 #define DEF_PROC(f) int proc_##f(NetworkServer *net, Link *link, const Request &req, Response *resp)
 
 typedef std::vector<Bytes> Request;
 typedef int (*proc_t)(NetworkServer *net, Link *link, const Request &req, Response *resp);
+
+int proc_redis_scan(NetworkServer *net, Link *link, const Request &req, Response *resp, const int type);
+bool is_pattern_match(const std::string &source, const std::string pattern);
 
 struct Command{
 	static const int FLAG_READ		= (1 << 0);
@@ -81,7 +89,7 @@ struct BytesHash{
 	}
 };
 
-
+// use macro? 
 #define GCC_VERSION (__GNUC__ * 100 + __GNUC_MINOR__)
 #if GCC_VERSION >= 403
 	#include <tr1/unordered_map>

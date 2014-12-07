@@ -10,16 +10,20 @@ found in the LICENSE file.
 #include "net/proc.h"
 #include "net/server.h"
 
+static size_t memory_used();
+
 DEF_PROC(get);
 DEF_PROC(set);
 DEF_PROC(setx);
 DEF_PROC(setnx);
+DEF_PROC(msetnx);
 DEF_PROC(getset);
 DEF_PROC(getbit);
 DEF_PROC(setbit);
 DEF_PROC(countbit);
 DEF_PROC(substr);
 DEF_PROC(getrange);
+DEF_PROC(setrange);
 DEF_PROC(strlen);
 DEF_PROC(redis_bitcount);
 DEF_PROC(del);
@@ -27,6 +31,7 @@ DEF_PROC(incr);
 DEF_PROC(decr);
 DEF_PROC(scan);
 DEF_PROC(rscan);
+DEF_PROC(redis_scan);
 DEF_PROC(keys);
 DEF_PROC(exists);
 DEF_PROC(multi_exists);
@@ -44,6 +49,7 @@ DEF_PROC(hclear);
 DEF_PROC(hgetall);
 DEF_PROC(hscan);
 DEF_PROC(hrscan);
+DEF_PROC(redis_hscan);
 DEF_PROC(hkeys);
 DEF_PROC(hvals);
 DEF_PROC(hlist);
@@ -68,6 +74,7 @@ DEF_PROC(zdecr);
 DEF_PROC(zclear);
 DEF_PROC(zscan);
 DEF_PROC(zrscan);
+DEF_PROC(redis_zscan);
 DEF_PROC(zkeys);
 DEF_PROC(zlist);
 DEF_PROC(zrlist);
@@ -82,6 +89,8 @@ DEF_PROC(multi_zsize);
 DEF_PROC(multi_zget);
 DEF_PROC(multi_zset);
 DEF_PROC(multi_zdel);
+DEF_PROC(zinterstore);
+DEF_PROC(zunionstore);
 	
 DEF_PROC(qsize);
 DEF_PROC(qfront);
@@ -89,9 +98,12 @@ DEF_PROC(qback);
 DEF_PROC(qpush);
 DEF_PROC(qpush_front);
 DEF_PROC(qpush_back);
+DEF_PROC(qpushx_front);
+DEF_PROC(qpushx_back);
 DEF_PROC(qpop);
 DEF_PROC(qpop_front);
 DEF_PROC(qpop_back);
+DEF_PROC(qbpop_fpush);
 DEF_PROC(qtrim_front);
 DEF_PROC(qtrim_back);
 DEF_PROC(qfix);
@@ -102,6 +114,20 @@ DEF_PROC(qslice);
 DEF_PROC(qrange);
 DEF_PROC(qget);
 DEF_PROC(qset);
+
+DEF_PROC(sadd);
+DEF_PROC(sismember);
+DEF_PROC(srem);
+DEF_PROC(scard);
+DEF_PROC(smembers);
+DEF_PROC(smove);
+DEF_PROC(redis_sscan);
+DEF_PROC(sinter);
+DEF_PROC(sinterstore);
+DEF_PROC(sunion);
+DEF_PROC(sunionstore);
+DEF_PROC(sdiff);
+DEF_PROC(sdiffstore);
 
 DEF_PROC(dump);
 DEF_PROC(sync140);
@@ -115,6 +141,8 @@ DEF_PROC(ttl);
 DEF_PROC(expire);
 DEF_PROC(clear_binlog);
 DEF_PROC(slaveof);
+DEF_PROC(client);
+DEF_PROC(config);
 
 
 #define PROC(c, f)     net->proc_map.set_proc(#c, f, proc_##c)
@@ -125,18 +153,21 @@ void SSDBServer::reg_procs(NetworkServer *net){
 	PROC(del, "wt");
 	PROC(setx, "wt");
 	PROC(setnx, "wt");
+	PROC(msetnx, "wt");
 	PROC(getset, "wt");
 	PROC(getbit, "rt");
 	PROC(setbit, "wt");
 	PROC(countbit, "rt");
 	PROC(substr, "rt");
 	PROC(getrange, "rt");
+	PROC(setrange, "wt");
 	PROC(strlen, "rt");
 	PROC(redis_bitcount, "rt");
 	PROC(incr, "wt");
 	PROC(decr, "wt");
 	PROC(scan, "rt");
 	PROC(rscan, "rt");
+	PROC(redis_scan, "rt");
 	PROC(keys, "rt");
 	PROC(exists, "rt");
 	PROC(multi_exists, "rt");
@@ -154,6 +185,7 @@ void SSDBServer::reg_procs(NetworkServer *net){
 	PROC(hgetall, "rt");
 	PROC(hscan, "rt");
 	PROC(hrscan, "rt");
+	PROC(redis_hscan, "rt");
 	PROC(hkeys, "rt");
 	PROC(hvals, "rt");
 	PROC(hlist, "rt");
@@ -179,6 +211,7 @@ void SSDBServer::reg_procs(NetworkServer *net){
 	PROC(zclear, "wt");
 	PROC(zscan, "rt");
 	PROC(zrscan, "rt");
+	PROC(redis_zscan, "rt");
 	PROC(zkeys, "rt");
 	PROC(zlist, "rt");
 	PROC(zrlist, "rt");
@@ -193,6 +226,8 @@ void SSDBServer::reg_procs(NetworkServer *net){
 	PROC(multi_zget, "rt");
 	PROC(multi_zset, "wt");
 	PROC(multi_zdel, "wt");
+	PROC(zinterstore, "wt");
+	PROC(zunionstore, "wt");
 
 	PROC(qsize, "rt");
 	PROC(qfront, "rt");
@@ -200,9 +235,12 @@ void SSDBServer::reg_procs(NetworkServer *net){
 	PROC(qpush, "wt");
 	PROC(qpush_front, "wt");
 	PROC(qpush_back, "wt");
+	PROC(qpushx_front, "wt");
+	PROC(qpushx_back, "wt");
 	PROC(qpop, "wt");
 	PROC(qpop_front, "wt");
 	PROC(qpop_back, "wt");
+	PROC(qbpop_fpush, "wt");
 	PROC(qtrim_front, "wt");
 	PROC(qtrim_back, "wt");
 	PROC(qfix, "wt");
@@ -213,6 +251,20 @@ void SSDBServer::reg_procs(NetworkServer *net){
 	PROC(qrange, "rt");
 	PROC(qget, "rt");
 	PROC(qset, "wt");
+
+    PROC(sadd, "wt");
+    PROC(sismember, "rt");
+    PROC(srem, "wt");
+    PROC(scard, "rt");
+    PROC(smembers, "rt");
+    PROC(smove, "wt");
+    PROC(redis_sscan, "rt");
+    PROC(sinter, "rt");
+    PROC(sinterstore, "wt");
+    PROC(sunion, "rt");
+    PROC(sunionstore, "wt");
+    PROC(sdiff, "rt");
+    PROC(sdiffstore, "wt");
 
 	PROC(clear_binlog, "wt");
 
@@ -230,27 +282,31 @@ void SSDBServer::reg_procs(NetworkServer *net){
 	PROC(set_key_range, "r");
 	// slaveof must run in the main thread
     PROC(slaveof, "r");
+	// client must run in the main thread
+	PROC(client, "r");
+	// config must run in the main thread
+	PROC(config, "w");
 
 	PROC(ttl, "rt");
 	PROC(expire, "wt");
 }
 
 
-SSDBServer::SSDBServer(SSDB *ssdb, SSDB *meta, const Config &conf, NetworkServer *net){
+SSDBServer::SSDBServer(SSDB *ssdb, SSDB *meta, Config *conf, const std::string &conf_path, NetworkServer *net):conf(conf),conf_path(conf_path){
 	this->ssdb = (SSDBImpl *)ssdb;
 	this->meta = meta;
 
 	net->data = this;
 	this->reg_procs(net);
 
-	int sync_speed = conf.get_num("replication.sync_speed");
+	int sync_speed = conf->get_num("replication.sync_speed");
 
 	backend_dump = new BackendDump(this->ssdb);
 	backend_sync = new BackendSync(this->ssdb, sync_speed);
 	expiration = new ExpirationHandler(this->ssdb);
 
     {
-        int port = conf.get_num("server.port"); 
+        int port = conf->get_num("server.port"); 
         struct ifaddrs *ifh, *ifc;
         char addr[32] = {0};
         if (getifaddrs(&ifh) == 0) {
@@ -270,7 +326,7 @@ SSDBServer::SSDBServer(SSDB *ssdb, SSDB *meta, const Config &conf, NetworkServer
     }
 
 	{ // slaves
-		const Config *repl_conf = conf.get("replication");
+		const Config *repl_conf = conf->get("replication");
 		if(repl_conf != NULL){
 			std::vector<Config *> children = repl_conf->children;
 			for(std::vector<Config *>::iterator it = children.begin(); it != children.end(); it++){
@@ -293,6 +349,13 @@ SSDBServer::SSDBServer(SSDB *ssdb, SSDB *meta, const Config &conf, NetworkServer
 		log_fatal("load key_range failed!");
 		exit(1);
 	}
+
+    ret = load_kv_stats();
+	if(ret == -1){
+		log_fatal("load kv_stats failed!");
+		exit(1);
+	}
+
 	log_info("key_range.kv: \"%s\", \"%s\"",
 		str_escape(this->kv_range_s).c_str(),
 		str_escape(this->kv_range_e).c_str()
@@ -300,13 +363,13 @@ SSDBServer::SSDBServer(SSDB *ssdb, SSDB *meta, const Config &conf, NetworkServer
 }
 
 SSDBServer::~SSDBServer(){
+    save_kv_stats(true);
     destroy_all_slaves();
     addrs.clear();
 
 	delete backend_dump;
 	delete backend_sync;
 	delete expiration;
-    // FIXME write and thread pool stop ?
 
 	log_debug("SSDBServer finalized");
 }
@@ -403,6 +466,56 @@ bool SSDBServer::in_kv_range(const std::string &key){
 		return false;
 	}
 	return true;
+}
+
+int SSDBServer::load_kv_stats(){
+    std::string kv_size_s, kv_count_s, hash_count_s, zset_count_s, queue_count_s; 
+	if(meta->hget("key_stats", "kv_size", &kv_size_s) == -1){
+		return -1;
+	}
+	if(meta->hget("key_stats", "kv_count", &kv_count_s) == -1){
+		return -1;
+	}
+	if(meta->hget("key_stats", "hash_count", &hash_count_s) == -1){
+		return -1;
+	}
+	if(meta->hget("key_stats", "zset_count", &zset_count_s) == -1){
+		return -1;
+	}
+	if(meta->hget("key_stats", "queue_count", &queue_count_s) == -1){
+		return -1;
+	}
+    ssdb->kv_size = str_to_uint64(kv_size_s);
+    ssdb->kv_count = str_to_uint64(kv_count_s);
+    ssdb->hash_count = str_to_uint64(hash_count_s);
+    ssdb->zset_count = str_to_uint64(zset_count_s);
+    ssdb->queue_count = str_to_uint64(queue_count_s);
+    log_info("load_kv_stats kv_size %ld kv_count %ld hash_count %ld zset_count %ld queue_count %ld", ssdb->kv_size, ssdb->kv_count, ssdb->hash_count, ssdb->zset_count, ssdb->queue_count);
+	return 0;
+}
+
+int SSDBServer::save_kv_stats(bool force){
+    if (!force && ssdb->update_count < 1000){
+        return 0;
+    }
+	if(meta->hset("key_stats", "kv_size", str(ssdb->kv_size)) == -1){
+		return -1;
+	}
+	if(meta->hset("key_stats", "kv_count", str(ssdb->kv_count)) == -1){
+		return -1;
+	}
+	if(meta->hset("key_stats", "hash_count", str(ssdb->hash_count)) == -1){
+		return -1;
+	}
+	if(meta->hset("key_stats", "zset_count", str(ssdb->zset_count)) == -1){
+		return -1;
+	}
+	if(meta->hset("key_stats", "queue_count", str(ssdb->queue_count)) == -1){
+		return -1;
+	}
+    ssdb->update_count = 0;
+    log_info("save_kv_stats kv_size %ld kv_count %ld hash_count %ld zset_count %ld queue_count %ld", ssdb->kv_size, ssdb->kv_count, ssdb->hash_count, ssdb->zset_count, ssdb->queue_count);
+	return 1;
 }
 
 /*********************/
@@ -507,11 +620,11 @@ int proc_info(NetworkServer *net, Link *link, const Request &req, Response *resp
         int64_t rss = memory_used();
         char rss_human[32];
         if (rss > 1000000) {
-            snprintf(rss_human, sizeof(rss_human), "%ld MByte", rss / 1000000);
+            snprintf(rss_human, sizeof(rss_human), "%ld MB", rss / 1000000);
         } else if (rss > 1000) {
-            snprintf(rss_human, sizeof(rss_human), "%ld KByte", rss / 1000);
+            snprintf(rss_human, sizeof(rss_human), "%ld KB", rss / 1000);
         } else {
-            snprintf(rss_human, sizeof(rss_human), "%ld Byte", rss);
+            snprintf(rss_human, sizeof(rss_human), "%ld B", rss);
         }
         resp->push_back("used_memory");
         resp->add(rss);
@@ -533,6 +646,25 @@ int proc_info(NetworkServer *net, Link *link, const Request &req, Response *resp
 		uint64_t size = serv->ssdb->size();
 		resp->push_back("dbsize");
 		resp->push_back(str(size));
+        std::string kv_start(1,DataType::KV-1);
+        std::string kv_end(1,DataType::KV+1);
+		uint64_t kv_total_size = serv->ssdb->size(kv_start,kv_end);
+        uint64_t kv_count = 0;
+        if (serv->ssdb->kv_count != 0) {
+            kv_count = kv_total_size / (serv->ssdb->kv_size / serv->ssdb->kv_count + MIN_LEVELDB_SIZE);
+        }
+		resp->push_back("kv_update_size"); // total add/update count
+		resp->push_back(str(serv->ssdb->kv_size));
+		resp->push_back("kv_update_count"); // total add/update count
+		resp->push_back(str(serv->ssdb->kv_count));
+		resp->push_back("kv_count");
+		resp->push_back(str(kv_count));
+		resp->push_back("hash_count");
+		resp->push_back(str(serv->ssdb->hash_count));
+		resp->push_back("zset_count");
+		resp->push_back(str(serv->ssdb->zset_count));
+		resp->push_back("queue_count");
+		resp->push_back(str(serv->ssdb->queue_count));
 	}
 
 	{
@@ -618,44 +750,336 @@ int proc_info(NetworkServer *net, Link *link, const Request &req, Response *resp
 	return 0;
 }
 
-int proc_slaveof(NetworkServer *net, Link *link, const Request &req, Response *resp){
-    SSDBServer *serv = (SSDBServer *)net->data; 
+static int proc_slaveof_noone(NetworkServer *net, Link *link, const Request &req, Response *resp);
+static int proc_slaveof_master(NetworkServer *net, Link *link, const Request &req, Response *resp);
 
-    if (req.size() < 3 ||
-            (req.size() == 3 && (req[1] != "no" || req[2] != "one"))) {
+int proc_slaveof(NetworkServer *net, Link *link, const Request &req, Response *resp){
+    CHECK_NUM_PARAMS(3);
+
+    if (req.size() == 3 && (req[1] != "no" || req[2] != "one")) {
         resp->push_back("client_error");
+        resp->push_back("param error");
         return 0;
     }
 
     // slaveof no one, stop slave threads
     if (req[1] == "no" && req[2] == "one") {
-        serv->destroy_all_slaves();
+        return proc_slaveof_noone(net, link, req, resp);
+    } else {
+        return proc_slaveof_master(net, link, req, resp);
+    }
+}
 
-        // FIXME log more info: current replication masters, current position
-        log_info("slaveof no one");
-        resp->reply_status(0, NULL);
-        return 0;
-    } 
-    
-    // slaveof master_ip master_port (mirror|sync) [id]
+// slaveof no one
+static int proc_slaveof_noone(NetworkServer *net, Link *link, const Request &req, Response *resp){
+    SSDBServer *serv = (SSDBServer *)net->data; 
+    log_info("slaveof no one");
 
+    // destroy slaves
+    std::vector<Slave *>::iterator it;
+    for(it = serv->slaves.begin(); it != serv->slaves.end(); it++){
+        Slave *slave = *it;
+        std::string s = slave->stats();
+        log_info("slaveof no one: current replication stats %s", s.c_str());
+    }
+    serv->destroy_all_slaves();
+    // change conf
+    serv->conf->del("replication.slaveof");
+    resp->reply_status(0, NULL);
+
+    return 0;
+}
+
+// slaveof master_ip master_port (mirror|sync) [id]
+static int proc_slaveof_master(NetworkServer *net, Link *link, const Request &req, Response *resp){
+    SSDBServer *serv = (SSDBServer *)net->data; 
     std::string ip = req[1].String();
     int port = req[2].Int();
     std::string type = req[3].String();
     std::string id = req.size() >= 5 ? req[4].String() : "";
 
+    if (serv->slaves.size() > 0) {
+        log_warn("slaveof %s %d %s %s, slave already exist", ip.c_str(), port, type.c_str(), id.c_str());
+        resp->reply_status(-1, "slave already exist");
+        return 0;
+    }
     int status = serv->create_slave(ip, port, type, id);
 
     if (status == 0) {
+        log_info("slaveof %s %d %s %s success", ip.c_str(), port, type.c_str(), id.c_str());
+        Config *conf = serv->conf->find_child("replication");
+        if (conf == NULL) {
+            conf = serv->conf->add_child("replication", "");
+        }
+        conf = conf->add_child("slaveof", "");
+        if (!id.empty()) {
+            conf->add_child("id", id.c_str());
+        }
+        conf->add_child("type", type.c_str());
+        conf->add_child("ip", ip.c_str());
+        conf->add_child("port", req[2].String().c_str());
+
         resp->reply_status(0, NULL);
     } else {
+        log_error("slaveof %s %d %s %s failed", ip.c_str(), port, type.c_str(), id.c_str());
         resp->reply_status(-1, "create slave failed");
     }
-    // FIXME dump ssdb.conf
     return 0;
 }
 
-size_t memory_used() {
+static int proc_client_list(NetworkServer *net, Link *link, const Request &req, Response *resp);
+static int proc_client_kill(NetworkServer *net, Link *link, const Request &req, Response *resp);
+
+int proc_client(NetworkServer *net, Link *link, const Request &req, Response *resp){
+    CHECK_NUM_PARAMS(2);
+
+    if (req[1] == "list") {
+        return proc_client_list(net, link, req, resp);
+    } else if (req[1] == "kill") {
+        return proc_client_kill(net, link, req, resp);
+    } else {
+        resp->push_back("client_error");
+        resp->push_back("param error");
+    }
+
+    return 0;
+}
+
+static int proc_client_list(NetworkServer *net, Link *link, const Request &req, Response *resp){
+	resp->push_back("ok");
+
+    char info[64];
+    for (link_map_t::const_iterator it = net->link_map.begin();it != net->link_map.end(); it ++) {
+        snprintf(info, sizeof(info), "addr=%s", it->first.c_str());
+        resp->push_back(info);
+    }
+
+    return 0;
+}
+
+static int proc_client_kill(NetworkServer *net, Link *link, const Request &req, Response *resp){
+    CHECK_NUM_PARAMS(4);
+
+    if (req[2] != "addr") {
+        resp->push_back("client_error");
+        resp->push_back("param error");
+        return 0;
+    }
+
+    link_map_t::iterator it = net->link_map.find(req[3].String());
+    if (it != net->link_map.end() && it->second != link) {
+        if (it->second->ref_count == 0) {
+            net->destroy_link(it->second); // delete link
+        } else {
+            it->second->mark_error(); // mark link error
+        }
+        resp->reply_status(0,NULL);
+    } else {
+        resp->reply_status(-1,"link not exist");
+    }
+    
+    return 0;
+}
+
+static int proc_config_rewrite(NetworkServer *net, Link *link, const Request &req, Response *resp);
+
+int proc_config(NetworkServer *net, Link *link, const Request &req, Response *resp){
+    CHECK_NUM_PARAMS(2);
+
+    if (req[1] == "rewrite") {
+        return proc_config_rewrite(net, link, req, resp);
+    } else {
+        resp->push_back("client_error");
+        resp->push_back("param error");
+    }
+
+    return 0;
+}
+static int proc_config_rewrite(NetworkServer *net, Link *link, const Request &req, Response *resp){
+	SSDBServer *serv = (SSDBServer *)net->data;
+
+	time_t time;
+	struct timeval tv;
+	struct tm *tm;
+    char tmbuf[32];
+    char conf_path_bak[serv->conf_path.size() + 32];
+
+    gettimeofday(&tv,NULL);
+	time = tv.tv_sec;
+	tm = localtime(&time);
+    strftime(tmbuf, sizeof(tmbuf), "%Y%m%d_%H%M%S", tm);
+    int mill_sec = (int)(tv.tv_usec/1000) > 0 ?  (int)(tv.tv_usec/1000) : 1; // if mill_sec == 0, %3d format will show "  0"
+    snprintf(conf_path_bak, sizeof(conf_path_bak), "%s.%s_%03d", serv->conf_path.c_str(), tmbuf, mill_sec);
+
+	int ret = rename(serv->conf_path.c_str(), conf_path_bak);
+	if(ret == -1){
+		log_error("conf %s rename error: %s", serv->conf_path.c_str(), strerror(errno));
+        resp->reply_status(-1,"conf file rename error");
+		return 0;
+    }
+    
+    ret = serv->conf->save(serv->conf_path.c_str());
+	if(ret == -1){
+        resp->reply_status(-1,"conf file rename error");
+    } else {
+        resp->reply_status(0,NULL);
+    }
+
+    return 0;
+}
+
+static int kv_scan(SSDBServer *serv, std::string &cursor_key, const std::string &pattern, bool use_pattern, int count, std::vector<std::string> *result);
+static int hash_scan(SSDBServer *serv, const std::string &name, std::string &cursor_key, const std::string &pattern, bool use_pattern, int count, std::vector<std::string> *result, int type);
+static int zset_scan(SSDBServer *serv, const std::string &name, std::string &cursor_key, std::string &cursor_score, const std::string &pattern, bool use_pattern, int count, std::vector<std::string> *result);
+
+/*
+ * Support redis command:
+ *      *SCAN  cursor [match pattern] [count number]
+ *
+ *      SCAN iterates the set of keys in the currently selected Redis database.
+ *      SSCAN iterates elements of Sets types.
+ *      HSCAN iterates fields of Hash types and their associated values.
+ *      ZSCAN iterates elements of Sorted Set types and their associated scores.
+ *
+ * The only valid cursors to use are:
+ *      The cursor value of 0 when starting an iteration.
+ *      The cursor returned by the previous call to SCAN in order to continue the iteration.
+ *      Other is undefined
+ *
+ * There is keep a state in link:
+ *      So just support iterator with same client and the same command. 
+ *      Other is undefined.
+ */
+int proc_redis_scan(NetworkServer *net, Link *link, const Request &req, Response *resp, const int type){
+    // for example: scan 0 or hscan key 0 or zscan key 0
+    int min_size = (type == REDIS_SCAN) ? 2 : 3;
+
+	SSDBServer *serv = (SSDBServer *)net->data;
+	CHECK_NUM_PARAMS(min_size); 
+
+    if (req.size() > min_size && req.size() != (min_size + 2) && req.size() != (min_size + 4)) {
+		resp->push_back("client_error"); 
+		resp->push_back("wrong number of arguments"); 
+        return 0;
+    }
+
+    int count = 10; // default
+    bool use_pattern = false; // [match pattern]
+    std::string pattern; 
+	uint64_t cursor = req[min_size-1].Uint64();
+
+    for (int i = min_size; i < req.size(); i += 2) {
+        if (req[i] == "count") {
+            count = req[i+1].Int();
+        } else if (req[i] == "match") {
+            use_pattern = true;
+            pattern = req[i+1].String();
+        } else {
+            resp->push_back("client_error"); 
+            resp->push_back("syntax error"); 
+            return 0;
+        }
+    }
+
+    if (count <= 0) {
+        resp->push_back("client_error"); 
+        resp->push_back("syntax error"); 
+        return 0;
+    }
+
+    // cursor => key_start(which is last key keep in link), because leveldb don't support redis's memory hash struct
+    std::string cursor_key = link->get_cursor_key(cursor);
+    std::string cursor_score = link->get_cursor_score(cursor);
+    if (cursor_key.empty()) {
+        cursor = 0;
+    }
+    log_debug("%s: cursor %ld cursor_key '%s' count %d", req[0].String().c_str(), cursor, cursor_key.c_str(), count);
+
+    int result = 0;
+    std::vector<std::string> keys;
+
+    // iterator db
+    switch(type) {
+        case REDIS_SCAN: // scan command, just return key
+            result = kv_scan(serv, cursor_key, pattern, use_pattern, count, &keys);
+            break;
+        case REDIS_SSCAN: // sscan command, need return key
+        case REDIS_HSCAN: // hscan command, need return key and val
+            result = hash_scan(serv, req[1].String(), cursor_key, pattern, use_pattern, count, &keys, type);
+            break;
+        case REDIS_ZSCAN: // zscan command, need return key and score
+            result = zset_scan(serv, req[1].String(), cursor_key, cursor_score, pattern, use_pattern, count, &keys);
+            break;
+        default:
+            resp->reply_status(-1,"unsupoort scan type");
+            return 0;
+    }
+
+	resp->push_back("ok");
+
+    if (result >= count) {
+        link->reset_cursor(cursor_key, cursor_score, cursor + result);
+        resp->add((int64_t)cursor + result);
+    } else {
+        link->reset_cursor("", "", 0);
+        resp->add((int64_t)0);
+    }
+
+    for (std::vector<std::string>::iterator it = keys.begin(); it != keys.end(); it ++) {
+        resp->push_back(*it);
+    }
+
+	return 0;
+}
+
+static int kv_scan(SSDBServer *serv, std::string &cursor_key, const std::string &pattern, bool use_pattern, int count, std::vector<std::string> *result) {
+    int result_count = 0;
+    KIterator *it = serv->ssdb->scan(cursor_key, "", count);
+    while(it->next()){
+        if (!use_pattern || is_pattern_match(it->key, pattern)) {
+            result->push_back(it->key);
+        }
+        cursor_key = it->key;
+        result_count ++;
+    }
+    delete it;
+    return result_count;
+}
+
+static int hash_scan(SSDBServer *serv, const std::string &name, std::string &cursor_key, const std::string &pattern, bool use_pattern, int count, std::vector<std::string> *result, int type) {
+    int result_count = 0;
+    HIterator *it = serv->ssdb->hscan(name, cursor_key, "", count);
+    while(it->next()){
+        if (!use_pattern || is_pattern_match(it->key, pattern)) {
+            result->push_back(it->key);
+            if (type == REDIS_HSCAN) {
+                result->push_back(it->val);
+            }
+        }
+        cursor_key = it->key;
+        result_count ++;
+    }
+    delete it;
+    return result_count;
+}
+
+static int zset_scan(SSDBServer *serv, const std::string &name, std::string &cursor_key, std::string &cursor_score, const std::string &pattern, bool use_pattern, int count, std::vector<std::string> *result) {
+    int result_count = 0;
+    ZIterator *it = serv->ssdb->zscan(name, cursor_key, cursor_score, "", count);
+    while(it->next()){
+        if (!use_pattern || is_pattern_match(it->key, pattern)) {
+            result->push_back(it->key);
+            result->push_back(it->score);
+        }
+        cursor_key = it->key;
+        cursor_score = it->score;
+        result_count ++;
+    }
+    delete it;
+    return result_count;
+}
+
+static size_t memory_used() {
     int fd;
     char filename[256] = {0}, buf[4096] = {0};
     snprintf(filename,sizeof(filename),"/proc/%d/stat",getpid());             

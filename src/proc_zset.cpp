@@ -8,6 +8,8 @@ found in the LICENSE file.
 #include "net/proc.h"
 #include "net/server.h"
 
+static int proc_join_zsets(NetworkServer *net, Link *link, const Request &req, Response *resp, int type);
+
 int proc_zexists(NetworkServer *net, Link *link, const Request &req, Response *resp){
 	SSDBServer *serv = (SSDBServer *)net->data;
 	CHECK_NUM_PARAMS(3);
@@ -77,6 +79,7 @@ int proc_multi_zset(NetworkServer *net, Link *link, const Request &req, Response
 				num += ret;
 			}
 		}
+        serv->save_kv_stats();
 		resp->reply_int(0, num);
 	}
 	return 0;
@@ -99,6 +102,7 @@ int proc_multi_zdel(NetworkServer *net, Link *link, const Request &req, Response
 			num += ret;
 		}
 	}
+    serv->save_kv_stats();
 	resp->reply_int(0, num);
 	return 0;
 }
@@ -128,6 +132,7 @@ int proc_zset(NetworkServer *net, Link *link, const Request &req, Response *resp
 	CHECK_NUM_PARAMS(4);
 
 	int ret = serv->ssdb->zset(req[1], req[2], req[3]);
+    serv->save_kv_stats();
 	resp->reply_int(ret, ret);
 	return 0;
 }
@@ -156,6 +161,7 @@ int proc_zdel(NetworkServer *net, Link *link, const Request &req, Response *resp
 	CHECK_NUM_PARAMS(3);
 
 	int ret = serv->ssdb->zdel(req[1], req[2]);
+    serv->save_kv_stats();
 	resp->reply_bool(ret);
 	return 0;
 }
@@ -235,6 +241,7 @@ int proc_zclear(NetworkServer *net, Link *link, const Request &req, Response *re
 		}
 		count += num;
 	}
+    serv->save_kv_stats();
 	resp->reply_int(0, count);
 
 	return 0;
@@ -286,6 +293,10 @@ int proc_zrscan(NetworkServer *net, Link *link, const Request &req, Response *re
 	return 0;
 }
 
+int proc_redis_zscan(NetworkServer *net, Link *link, const Request &req, Response *resp){
+    return proc_redis_scan(net, link, req, resp, REDIS_ZSCAN);
+}
+
 int proc_zkeys(NetworkServer *net, Link *link, const Request &req, Response *resp){
 	SSDBServer *serv = (SSDBServer *)net->data;
 	CHECK_NUM_PARAMS(6);
@@ -323,7 +334,7 @@ int proc_zrlist(NetworkServer *net, Link *link, const Request &req, Response *re
 }
 
 // dir := +1|-1
-static int _zincr(SSDB *ssdb, const Request &req, Response *resp, int dir){
+static int _zincr(SSDBServer *serv, const Request &req, Response *resp, int dir){
 	CHECK_NUM_PARAMS(3);
 
 	int64_t by = 1;
@@ -331,19 +342,20 @@ static int _zincr(SSDB *ssdb, const Request &req, Response *resp, int dir){
 		by = req[3].Int64();
 	}
 	int64_t new_val;
-	int ret = ssdb->zincr(req[1], req[2], dir * by, &new_val);
+	int ret = serv->ssdb->zincr(req[1], req[2], dir * by, &new_val);
+    serv->save_kv_stats();
 	resp->reply_int(ret, new_val);
 	return 0;
 }
 
 int proc_zincr(NetworkServer *net, Link *link, const Request &req, Response *resp){
 	SSDBServer *serv = (SSDBServer *)net->data;
-	return _zincr(serv->ssdb, req, resp, 1);
+	return _zincr(serv, req, resp, 1);
 }
 
 int proc_zdecr(NetworkServer *net, Link *link, const Request &req, Response *resp){
 	SSDBServer *serv = (SSDBServer *)net->data;
-	return _zincr(serv->ssdb, req, resp, -1);
+	return _zincr(serv, req, resp, -1);
 }
 
 int proc_zcount(NetworkServer *net, Link *link, const Request &req, Response *resp){
@@ -412,6 +424,7 @@ int proc_zremrangebyscore(NetworkServer *net, Link *link, const Request &req, Re
 	}
 	delete it;
 	
+    serv->save_kv_stats();
 	resp->reply_int(0, count);
 	return 0;
 }
@@ -435,7 +448,153 @@ int proc_zremrangebyrank(NetworkServer *net, Link *link, const Request &req, Res
 	}
 	delete it;
 	
+    serv->save_kv_stats();
 	resp->reply_int(0, count);
 	return 0;
 }
 
+int proc_zinterstore(NetworkServer *net, Link *link, const Request &req, Response *resp){
+    return proc_join_zsets(net, link, req, resp, INTER_TYPE);
+}
+
+int proc_zunionstore(NetworkServer *net, Link *link, const Request &req, Response *resp){
+    return proc_join_zsets(net, link, req, resp, UNION_TYPE);
+}
+
+/*
+ * ZUNIONSTORE destination numkeys key [key ...] [WEIGHTS weight [weight ...]] [AGGREGATE SUM|MIN|MAX]
+ */
+static int proc_join_zsets(NetworkServer *net, Link *link, const Request &req, Response *resp, int type){
+    int offset = 3;
+	SSDBServer *serv = (SSDBServer *)net->data;
+	CHECK_NUM_PARAMS(offset);
+
+    int numkeys = req[2].Int();
+    int size = numkeys + offset;
+    if (numkeys <= 0 || req.size() < size) {
+		resp->push_back("client_error"); 
+		resp->push_back("wrong number of arguments"); 
+        return 0;
+    }
+    
+    std::vector<int> weights;
+    int aggregate_type = AGGREGATE_SUM_TYPE;
+
+    for (int i = size; i < req.size();) {
+        if (req[i] == "weight") {
+            if (req.size() < i + 1 + numkeys) {
+                resp->push_back("client_error"); 
+                resp->push_back("wrong number of arguments"); 
+                return 0;
+            }
+            for (int j = 1; j <= numkeys; j ++) {
+                weights.push_back(req[i + j].Int());
+            }
+            i += numkeys + 1;
+        } else if (req[i] == "aggregate") {
+            if (req[i+1] == "sum") {
+                aggregate_type = AGGREGATE_SUM_TYPE;
+            } else if (req[i+1] == "min") {
+                aggregate_type = AGGREGATE_MIN_TYPE;
+            } else if (req[i+1] == "max") {
+                aggregate_type = AGGREGATE_MAX_TYPE;
+            } else {
+                resp->push_back("client_error"); 
+                resp->push_back("wrong number of arguments"); 
+                return 0;
+            }
+            i += 2;
+        } else {
+            resp->push_back("client_error"); 
+            resp->push_back("wrong number of arguments"); 
+            return 0;
+        }
+    }
+
+    if (weights.empty()) {
+        for (int i = 0; i < numkeys; i ++) {
+            weights.push_back(1);
+        }
+    }
+
+    int min_len = -1, min_index = 0;
+    std::vector< std::map<std::string,int64_t> > vectors; 
+    for (int i = offset; i < offset + numkeys; i ++) {
+        std::map<std::string,int64_t> key_scores;
+        // FIXME 控制大小,防止内存爆掉
+	    ZIterator *it = serv->ssdb->zscan(req[i], "", "", "", SSDB_MAX_SCAN_LEN);
+        while(it->next()){
+            int64_t score = str_to_int64(it->score) * weights[i-offset];
+            key_scores[it->key] = score;
+        }
+	    delete it;
+        if (key_scores.size() == 0 && type == INTER_TYPE) {
+            resp->reply_int(0, 0);
+            return 0;
+        }
+        vectors.push_back(key_scores);
+        if (min_len == -1 || min_len > key_scores.size()) {
+            min_len = key_scores.size();
+            min_index = i - offset;
+        }
+    }
+
+    std::map<std::string,int64_t> result;
+    if (type == INTER_TYPE) {
+        result = vectors[min_index]; // copy sets
+        for (std::map<std::string,int64_t>::iterator it = vectors[min_index].begin(); it != vectors[min_index].end(); it ++) {
+            std::string key = it->first;
+            int64_t score = it->second;
+            for (int i = 0; i < vectors.size(); i ++) {
+                if (i == min_index) {
+                    continue;
+                }
+                std::map<std::string,int64_t>::iterator fit = vectors[i].find(key);
+                if (fit == vectors[i].end()){
+                    // remove not found
+                    result.erase(key);
+                } else {
+                    if (aggregate_type == AGGREGATE_MIN_TYPE) {
+                        result[key] = score < fit->second ?  score : fit->second;
+                    } else if (aggregate_type == AGGREGATE_MAX_TYPE) {
+                        result[key] = score > fit->second ? score : fit->second;
+                    } else {
+                        result[key] = score + fit->second;
+                    }
+                }
+           }
+        }
+    } else if (type == UNION_TYPE) {
+        for (int i = 0; i < vectors.size(); i ++) {
+            for (std::map<std::string,int64_t>::iterator it = vectors[i].begin(); it != vectors[i].end(); it ++) {
+                std::string key = it->first;
+                int64_t score = it->second;
+                
+                std::map<std::string,int64_t>::iterator rit = result.find(key);
+
+                if (rit == result.end()) { // not found
+                    result[key] = score;
+                } else {
+                    if (aggregate_type == AGGREGATE_MIN_TYPE) {
+                        rit->second = score < rit->second ?  score : rit->second;
+                    } else if (aggregate_type == AGGREGATE_MAX_TYPE) {
+                        rit->second = score > rit->second ?  score : rit->second;
+                    } else {
+                        rit->second = score + rit->second;
+                    }
+                }
+            }
+        }
+    }
+
+    for(std::map<std::string,int64_t>::iterator it = result.begin(); it != result.end(); it ++) {
+        int ret = serv->ssdb->zset(req[1], it->first, str(it->second));
+        if(ret == -1){
+            resp->push_back("error");
+            return 0;
+        }
+    }
+    serv->save_kv_stats();
+    resp->reply_int(0, result.size());
+	return 0;
+} 

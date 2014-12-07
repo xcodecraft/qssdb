@@ -8,6 +8,7 @@ found in the LICENSE file.
 int SSDBImpl::multi_set(const std::vector<Bytes> &kvs, int offset, char log_type){
 	Transaction trans(binlogs);
 
+    uint64_t size = 0;
 	std::vector<Bytes>::const_iterator it;
 	it = kvs.begin() + offset;
 	for(; it != kvs.end(); it += 2){
@@ -22,13 +23,18 @@ int SSDBImpl::multi_set(const std::vector<Bytes> &kvs, int offset, char log_type
         leveldb::Slice val_slice = slice(val);
 		binlogs->Put(buf, val_slice);
 		binlogs->add_log(log_type, BinlogCommand::KSET, buf, val_slice);
+        size += key.size() + val.size();
 	}
 	leveldb::Status s = binlogs->commit();
 	if(!s.ok()){
 		log_error("multi_set error: %s", s.ToString().c_str());
 		return -1;
 	}
-	return (kvs.size() - offset)/2;
+    int count = (kvs.size() - offset)/2;
+    kv_size += size;
+    kv_count += count;
+    update_count += count;
+	return count;
 }
 
 int SSDBImpl::multi_del(const std::vector<Bytes> &keys, int offset, char log_type){
@@ -67,6 +73,9 @@ int SSDBImpl::set(const Bytes &key, const Bytes &val, char log_type){
 		log_error("set error: %s", s.ToString().c_str());
 		return -1;
 	}
+    kv_size += key.size() + val.size();
+    kv_count ++;
+    update_count ++;
 	return 1;
 }
 
@@ -92,6 +101,44 @@ int SSDBImpl::setnx(const Bytes &key, const Bytes &val, char log_type){
 		log_error("set error: %s", s.ToString().c_str());
 		return -1;
 	}
+    kv_size += key.size() + val.size();
+    kv_count ++;
+    update_count ++;
+	return 1;
+}
+
+int SSDBImpl::msetnx(const std::vector<Bytes> &kvs, int offset, char log_type){
+	Transaction trans(binlogs);
+
+    uint64_t size = 0;
+	std::vector<Bytes>::const_iterator it;
+	it = kvs.begin() + offset;
+	for(; it != kvs.end(); it += 2){
+		const Bytes &key = *it;
+		if(key.empty()){
+			log_error("empty key!");
+			return 0;
+		}
+        std::string tmp;
+        int found = this->get(key, &tmp);
+        if(found != 0){
+            return 0;
+        }
+		const Bytes &val = *(it + 1);
+		std::string buf = encode_kv_key(key);
+        leveldb::Slice val_slice = slice(val);
+		binlogs->Put(buf, val_slice);
+		binlogs->add_log(log_type, BinlogCommand::KSET, buf, val_slice);
+        size += key.size() + val.size();
+	}
+	leveldb::Status s = binlogs->commit();
+	if(!s.ok()){
+		log_error("multi_set error: %s", s.ToString().c_str());
+		return -1;
+	}
+    kv_size += size;
+    kv_count += (kvs.size() - offset)/2;
+    update_count += (kvs.size() - offset)/2; 
 	return 1;
 }
 
@@ -113,6 +160,9 @@ int SSDBImpl::getset(const Bytes &key, std::string *val, const Bytes &newval, ch
 		log_error("set error: %s", s.ToString().c_str());
 		return -1;
 	}
+    kv_size += key.size() + newval.size();
+    kv_count ++;
+    update_count ++;
 	return found;
 }
 
@@ -158,6 +208,11 @@ int SSDBImpl::incr(const Bytes &key, int64_t by, int64_t *new_val, char log_type
 		log_error("del error: %s", s.ToString().c_str());
 		return -1;
 	}
+    if (ret == 0) {
+        kv_size += key.size() + 8;
+        kv_count ++;
+        update_count ++;
+    }
 	return 1;
 }
 
@@ -238,6 +293,11 @@ int SSDBImpl::setbit(const Bytes &key, int bitoffset, int on, char log_type){
 		log_error("set error: %s", s.ToString().c_str());
 		return -1;
 	}
+    if (ret == 0) {
+        kv_size += key.size() + (bitoffset+8)/8;
+        kv_count ++;
+        update_count ++;
+    }
 	return orig;
 }
 
@@ -256,4 +316,40 @@ int SSDBImpl::getbit(const Bytes &key, int bitoffset){
 	return val[len] & (1 << bit);
 }
 
+int SSDBImpl::setrange(const Bytes &key, int offset, const Bytes &val, char log_type){
+	if(key.empty()){
+		log_error("empty key!");
+		return 0;
+	}
+    // FIXME limit max offset and val.size();
+	Transaction trans(binlogs);
+	
+	std::string sval;
+	int ret = this->get(key, &sval);
+	if(ret == -1){
+		return -1;
+	}
+	
+    int len = offset + val.size();
+	if(len > sval.size()){
+        // FIXME all right? 
+		sval.resize(len, 0);
+	}
+    sval.replace(offset,val.size(),val.String().c_str());
+
+	std::string buf = encode_kv_key(key);
+	binlogs->Put(buf, sval);
+	binlogs->add_log(log_type, BinlogCommand::KSET, buf, sval);
+	leveldb::Status s = binlogs->commit();
+	if(!s.ok()){
+		log_error("set error: %s", s.ToString().c_str());
+		return -1;
+	}
+    if (ret == 0) {
+        kv_size += offset + val.size();
+        kv_count ++;
+        update_count ++;
+    }
+	return len;
+}
 

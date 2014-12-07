@@ -9,6 +9,7 @@ found in the LICENSE file.
 #include "include.h"
 #include <map>
 #include <vector>
+#include <set>
 #include <string>
 #include "ssdb/ssdb_impl.h"
 #include "ssdb/ttl.h"
@@ -22,10 +23,11 @@ class SSDBServer
 {
 private:
 	void reg_procs(NetworkServer *net);
+    int load_kv_stats();
 	
 	std::string kv_range_s;
 	std::string kv_range_e;
-	
+
 	SSDB *meta;
 
 public:
@@ -35,8 +37,10 @@ public:
 	ExpirationHandler *expiration;
 	std::vector<Slave *> slaves;
     std::map<std::string,std::string> addrs;
+    Config *conf;
+    std::string conf_path;
 
-	SSDBServer(SSDB *ssdb, SSDB *meta, const Config &conf, NetworkServer *net);
+	SSDBServer(SSDB *ssdb, SSDB *meta, Config *conf, const std::string &conf_path, NetworkServer *net);
 	~SSDBServer();
 
 	int set_kv_range(const std::string &s, const std::string &e);
@@ -44,11 +48,12 @@ public:
 	bool in_kv_range(const std::string &key);
 	bool in_kv_range(const Bytes &key);
 
+    int save_kv_stats(bool force=false);
+
     int create_slave(std::string &ip, int port, std::string &type, std::string &id);
     void destroy_all_slaves();
 };
 
-size_t memory_used();
 
 #define CHECK_KEY_RANGE(n) do{ \
 		if(req.size() > n){ \

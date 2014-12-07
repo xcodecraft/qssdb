@@ -9,6 +9,7 @@ found in the LICENSE file.
 #include "../include.h"
 #include <string>
 #include <vector>
+#include <map>
 
 #include "fde.h"
 #include "proc.h"
@@ -20,6 +21,7 @@ class IpFilter;
 class Fdevents;
 
 typedef std::vector<Link *> ready_list_t;
+typedef std::map<std::string, Link *> link_map_t;
 
 class NetworkServer
 {
@@ -33,6 +35,7 @@ private:
 	Fdevents *fdes;
 
 	Link* accept_link();
+
 	int proc_result(ProcJob *job, ready_list_t *ready_list);
 	int proc_client_event(const Fdevent *fde, ready_list_t *ready_list);
 
@@ -51,9 +54,11 @@ protected:
 public:
 	void *data;
 	ProcMap proc_map;
+    link_map_t link_map;
 	int link_count;
 	bool need_auth;
 	std::string password;
+    int max_connections;
 
 	~NetworkServer();
 	
@@ -61,6 +66,7 @@ public:
 	static NetworkServer* init(const char *conf_file);
 	static NetworkServer* init(const Config &conf);
 	void serve();
+    void destroy_link(Link *link);
 };
 
 

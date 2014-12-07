@@ -36,8 +36,6 @@ class Config{
 		int depth;
 
 		Config* build_key_path(const char *key);
-		Config* add_child(const char *key, const char *val="", int lineno=0);
-		const Config* find_child(const char *key) const;
 	public:
 		Config(const char *key=NULL, const char *val=NULL);
 		~Config();
@@ -52,6 +50,9 @@ class Config{
 
 		Config* set(const char *key, const char *val);
 		const Config* get(const char *key) const;
+        int del(const char *key);
+		Config* find_child(const char *key) const;
+		Config* add_child(const char *key, const char *val="", int lineno=0);
 		int num() const;
 		int get_num(const char *key) const;
 		const char* str() const;

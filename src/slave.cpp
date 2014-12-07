@@ -168,7 +168,13 @@ int Slave::connect(){
 			log_error("[%s]failed to connect to master: %s:%d!", this->id_.c_str(), ip, port);
 			goto err;
 		}else{
-			status = INIT;
+            if (!this->last_key.empty()) {
+                status = COPY;
+            } else if (this->last_seq > 0) {
+                status = SYNC;
+            } else {
+			    status = INIT;
+            }
 			
 			connect_retry = 0;
 			char seq_buf[20];
@@ -337,15 +343,16 @@ int Slave::proc_copy(const Binlog &log, const std::vector<Bytes> &req){
             }
 			this->last_key = "";
 			this->save_status();
+			status = SYNC;
 			break;
 		default:
             if (this->is_mirror) {
                 // if master, don't set no_log
                 return proc_sync(log, req);
             } else {
-                // FIXME it has bug when there are multi replications
+                // FIXME unable to support multi replications
                 bool enabled = ssdb->get_binlogs()->is_enabled();
-                ssdb->get_binlogs()->set_enabled(true);
+                ssdb->get_binlogs()->set_enabled(false); // disabled binlog
                 int result = proc_sync(log, req);
                 ssdb->get_binlogs()->set_enabled(enabled);
                 return result;

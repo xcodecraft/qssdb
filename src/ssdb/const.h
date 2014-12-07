@@ -9,6 +9,18 @@ found in the LICENSE file.
 static const int SSDB_SCORE_WIDTH		= 9;
 static const int SSDB_KEY_LEN_MAX		= 255;
 
+static const int SSDB_MAX_SCAN_LEN		= 2000000000;
+
+static const int INTER_TYPE             = 1;
+static const int UNION_TYPE             = 2;
+static const int DIFF_TYPE              = 3;
+
+static const int AGGREGATE_SUM_TYPE     = 1;
+static const int AGGREGATE_MIN_TYPE     = 2;
+static const int AGGREGATE_MAX_TYPE     = 3;
+
+static const int MIN_LEVELDB_SIZE       = 174;
+
 class DataType{
 public:
 	static const char SYNCLOG	= 1;
