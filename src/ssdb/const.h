@@ -23,6 +23,12 @@ static const int MIN_LEVELDB_SIZE       = 174;
 
 static const std::string SLAVE_STATUS_PREFIX = "slave.status.";
 
+#ifdef NDEBUG
+	static const int LOG_QUEUE_SIZE  = 10 * 1000 * 1000;
+#else
+	static const int LOG_QUEUE_SIZE  = 10000;
+#endif
+
 class DataType{
 public:
 	static const char SYNCLOG	= 1;

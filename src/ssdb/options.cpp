@@ -4,6 +4,7 @@ Use of this source code is governed by a BSD-style license that can be
 found in the LICENSE file.
 */
 #include "options.h"
+#include "const.h"
 #include "../util/strings.h"
 
 Options::Options(){
@@ -19,6 +20,7 @@ void Options::load(const Config &conf){
 	compaction_speed = conf.get_num("leveldb.compaction_speed");
 	compression = conf.get_str("leveldb.compression");
 	std::string binlog = conf.get_str("replication.binlog");
+	binlog_capacity = conf.get_num("replication.binlog_capacity");
 
 	strtolower(&compression);
 	if(compression != "no"){
@@ -49,4 +51,7 @@ void Options::load(const Config &conf){
 			max_open_files = 1000;
 		}
 	}
+    if (binlog_capacity <= 0) {
+        binlog_capacity = LOG_QUEUE_SIZE;
+    }
 }

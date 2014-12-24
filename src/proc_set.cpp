@@ -83,7 +83,10 @@ int proc_smembers(NetworkServer *net, Link *link, const Request &req, Response *
 
 	HIterator *it = serv->ssdb->hscan(req[1], "", "", SSDB_MAX_SCAN_LEN);
 	resp->push_back("ok");
+	uint64_t size = 0;
 	while(it->next()){
+		size += it->key.size();
+		CHECK_OUTPUT_LIMIT(size);
 		resp->push_back(it->key);
 	}
 	delete it;

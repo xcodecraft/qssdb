@@ -113,11 +113,14 @@ int proc_multi_hget(NetworkServer *net, Link *link, const Request &req, Response
 	Request::const_iterator it=req.begin() + 1;
 	const Bytes name = *it;
 	it ++;
+	uint64_t size = 0;
 	for(; it!=req.end(); it+=1){
 		const Bytes &key = *it;
 		std::string val;
 		int ret = serv->ssdb->hget(name, key, &val);
 		if(ret == 1){
+			size += key.size() + val.size();
+			CHECK_OUTPUT_LIMIT(size);
 			resp->push_back(key.String());
 			resp->push_back(val);
 		}
@@ -201,7 +204,10 @@ int proc_hgetall(NetworkServer *net, Link *link, const Request &req, Response *r
 
 	HIterator *it = serv->ssdb->hscan(req[1], "", "", 2000000000);
 	resp->push_back("ok");
+	uint64_t size = 0;
 	while(it->next()){
+		size += it->key.size() + it->val.size();
+		CHECK_OUTPUT_LIMIT(size);
 		resp->push_back(it->key);
 		resp->push_back(it->val);
 	}
@@ -216,7 +222,10 @@ int proc_hscan(NetworkServer *net, Link *link, const Request &req, Response *res
 	uint64_t limit = req[4].Uint64();
 	HIterator *it = serv->ssdb->hscan(req[1], req[2], req[3], limit);
 	resp->push_back("ok");
+	uint64_t size = 0;
 	while(it->next()){
+		size += it->key.size() + it->val.size();
+		CHECK_OUTPUT_LIMIT(size);
 		resp->push_back(it->key);
 		resp->push_back(it->val);
 	}
@@ -235,7 +244,10 @@ int proc_hrscan(NetworkServer *net, Link *link, const Request &req, Response *re
 	uint64_t limit = req[4].Uint64();
 	HIterator *it = serv->ssdb->hrscan(req[1], req[2], req[3], limit);
 	resp->push_back("ok");
+	uint64_t size = 0;
 	while(it->next()){
+		size += it->key.size() + it->val.size();
+		CHECK_OUTPUT_LIMIT(size);
 		resp->push_back(it->key);
 		resp->push_back(it->val);
 	}
@@ -252,7 +264,10 @@ int proc_hkeys(NetworkServer *net, Link *link, const Request &req, Response *res
 	it->return_val(false);
 
 	resp->push_back("ok");
+	uint64_t size = 0;
 	while(it->next()){
+		size += it->key.size();
+		CHECK_OUTPUT_LIMIT(size);
 		resp->push_back(it->key);
 	}
 	delete it;
@@ -267,7 +282,10 @@ int proc_hvals(NetworkServer *net, Link *link, const Request &req, Response *res
 	HIterator *it = serv->ssdb->hscan(req[1], req[2], req[3], limit);
 
 	resp->push_back("ok");
+	uint64_t size = 0;
 	while(it->next()){
+		size += it->val.size();
+		CHECK_OUTPUT_LIMIT(size);
 		resp->push_back(it->val);
 	}
 	delete it;
@@ -279,6 +297,7 @@ int proc_hlist(NetworkServer *net, Link *link, const Request &req, Response *res
 	SSDBServer *serv = (SSDBServer *)net->data;
 
 	uint64_t limit = req[3].Uint64();
+    //FIXME check out_of_limit ?
 	std::vector<std::string> list;
 	int ret = serv->ssdb->hlist(req[1], req[2], limit, &list);
 	resp->reply_list(ret, list);
@@ -290,6 +309,7 @@ int proc_hrlist(NetworkServer *net, Link *link, const Request &req, Response *re
 	SSDBServer *serv = (SSDBServer *)net->data;
 
 	uint64_t limit = req[3].Uint64();
+    //FIXME check out_of_limit ?
 	std::vector<std::string> list;
 	int ret = serv->ssdb->hrlist(req[1], req[2], limit, &list);
 	resp->reply_list(ret, list);

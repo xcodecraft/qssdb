@@ -74,4 +74,12 @@ public:
 		} \
 	}while(0)
 
+#define CHECK_OUTPUT_LIMIT(size) do{ \
+		if(size > net->client_output_limit){ \
+            resp->resp.clear(); \
+            resp->reply_status(-1, "client output limit"); \
+            return 0; \
+		} \
+	}while(0)
+
 #endif

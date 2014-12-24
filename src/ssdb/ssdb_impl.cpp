@@ -94,7 +94,7 @@ SSDB* SSDB::open(const Options &opt, const std::string &dir){
         }
     }
 
-	ssdb->binlogs = new BinlogQueue(ssdb->db, ssdb->binlog_db, opt.binlog);
+	ssdb->binlogs = new BinlogQueue(ssdb->db, ssdb->binlog_db, opt.binlog_capacity, opt.binlog);
 
 	return ssdb;
 err:

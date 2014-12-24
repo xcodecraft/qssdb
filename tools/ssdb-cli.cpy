@@ -470,6 +470,15 @@ while(true){
 				}
 				sys.stderr.write(sprintf('%d result(s) (%.3f sec)\n', len(resp.data), time_consume));
 				break;
+			case 'client':
+				if(args[0] == "list") {
+					for(i=0; i<len(resp.data); i++){
+						print resp.data[i];
+					}
+				} else if(args[0] == "kill") {
+					print "ok";
+				}
+				break;
 			case 'get_key_range':
 				for(i=0; i<len(resp.data); i++){
 					resp.data[i] = repr_data(resp.data[i]);

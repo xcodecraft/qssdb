@@ -646,6 +646,13 @@ int proc_info(NetworkServer *net, Link *link, const Request &req, Response *resp
         resp->push_back("used_memory_human");
         resp->push_back(rss_human);
     }
+    {
+        // network in/out 
+        resp->push_back("bytes_read");
+        resp->add((int64_t)net->bytes_read);
+        resp->push_back("bytes_written");
+        resp->add((int64_t)net->bytes_written);
+    }
 	{
 		int64_t calls = 0;
 		proc_map_t::iterator it;
@@ -863,9 +870,13 @@ int proc_client(NetworkServer *net, Link *link, const Request &req, Response *re
 static int proc_client_list(NetworkServer *net, Link *link, const Request &req, Response *resp){
 	resp->push_back("ok");
 
-    char info[64];
+    char info[128];
+    double current = millitime();
     for (link_map_t::const_iterator it = net->link_map.begin();it != net->link_map.end(); it ++) {
-        snprintf(info, sizeof(info), "addr=%s", it->first.c_str());
+        Link *link = it->second;
+        int age = (int)((current - link->create_time));
+        int idle = (int)((current - link->active_time));
+        snprintf(info, sizeof(info), "addr=%s age=%d idle=%d cmd=%s", it->first.c_str(), age, idle, link->last_cmd.c_str());
         resp->push_back(info);
     }
 
@@ -951,6 +962,49 @@ static int proc_config_rewrite(NetworkServer *net, Link *link, const Request &re
 }
 
 static int proc_config_set(NetworkServer *net, Link *link, const Request &req, Response *resp) {
+    CHECK_NUM_PARAMS(4);
+
+    SSDBServer *serv = (SSDBServer *)net->data;
+    std::string name = req[2].String();
+
+    if (name == "server.max_connections" || name == "server.timeout" 
+            || name == "replication.binlog_capacity") {
+        int val = req[3].Int();
+        if (val <= 0) {
+            goto err;
+        }
+
+        serv->conf->set(name.c_str(), str(val).c_str());
+
+        if (name == "server.max_connections") {
+            net->max_connections = val;
+        } else if (name == "server.timeout") {
+            net->timeout = val;
+        } else if (name == "replication.binlog_capacity") {
+            serv->ssdb->binlogs->set_capacity(val);
+        }
+    } else if (name == "server.client_output_limit") {
+        int64_t val = req[3].Int64();
+        if (val <= 0) {
+            goto err;
+        }
+
+        serv->conf->set(name.c_str(), str(val).c_str());
+        net->client_output_limit = val;
+    } else {
+        resp->reply_status(-1,"config set failed, param not support");
+        return 0;
+    }
+    
+    resp->reply_status(0,NULL);
+    log_info("proc_config_set name: %s val: %s remote_ip: %s", name.c_str(), req[3].String().c_str(), link->remote_ip);
+    return 0;
+
+err:
+    char errmsg[256];
+    snprintf(errmsg, 256, "config set failed, %s(%s) need > 0", name.c_str(),req[3].String().c_str());
+    resp->reply_status(-1,errmsg);
+    log_error("proc_config_set %s remote_ip: %s", errmsg, link->remote_ip);
     return 0;
 }
 

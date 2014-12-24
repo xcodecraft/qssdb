@@ -38,6 +38,8 @@ class Link{
 		double create_time;
 		double active_time;
 
+		std::string last_cmd;
+
         int ref_count;
 
         /* for redis scan */

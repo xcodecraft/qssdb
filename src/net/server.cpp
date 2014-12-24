@@ -44,6 +44,11 @@ NetworkServer::NetworkServer(){
 	serv_link = NULL;
 	link_count = 0;
     max_connections = INT_MAX;
+    client_output_limit = 1024 * 1024 * 100;
+    timeout = INT_MAX;;
+
+    bytes_read = 0;
+    bytes_written = 0;
 
 	fdes = new Fdevents();
 	ip_filter = new IpFilter();
@@ -134,6 +139,20 @@ NetworkServer* NetworkServer::init(const Config &conf){
 					log_info("    max_connections %d", max_connections);
                     if (max_connections > 0) {
                         serv->max_connections = max_connections;
+                    }
+				}
+				if((*it)->key == "client_output_limit"){
+					int64_t client_output_limit = (*it)->num();
+					log_info("    client_output_limit %ld", client_output_limit);
+                    if (client_output_limit > 0) {
+                        serv->client_output_limit = client_output_limit;
+                    }
+				}
+				if((*it)->key == "timeout"){
+					int timeout = (*it)->num();
+					log_info("    timeout %d", timeout);
+                    if (timeout > 0) {
+                        serv->timeout = timeout;
                     }
 				}
 			}
@@ -260,6 +279,10 @@ void NetworkServer::serve(){
 			}
 			
 			link->active_time = millitime();
+            //FIXME
+			char remote_ip_port[32];
+		    snprintf(remote_ip_port, 32, "%s:%d", link->remote_ip, link->remote_port);
+			this->active_links.add(remote_ip_port,(int64_t)link->active_time);
 
 			ProcJob job;
 			job.link = link;
@@ -274,6 +297,7 @@ void NetworkServer::serve(){
                 char remote_ip_port[32];
                 snprintf(remote_ip_port, 32, "%s:%d", link->remote_ip, link->remote_port);
                 this->link_map.erase(remote_ip_port);
+                this->active_links.del(remote_ip_port);
                 // don't delete link
 				continue;
 			}
@@ -282,6 +306,9 @@ void NetworkServer::serve(){
 				//
             }
 		} // end foreach ready link
+
+        //every event loop
+        destroy_idle_link();
 	}
 }
 
@@ -310,6 +337,7 @@ Link* NetworkServer::accept_link(){
     char remote_ip_port[32];
     snprintf(remote_ip_port, 32, "%s:%d", link->remote_ip, link->remote_port);
     this->link_map[remote_ip_port] = link;
+    this->active_links.add(remote_ip_port,(int64_t)link->active_time);
 
 	return link;
 }
@@ -321,6 +349,7 @@ void NetworkServer::destroy_link(Link *link){
     char remote_ip_port[32];
     snprintf(remote_ip_port, 32, "%s:%d", link->remote_ip, link->remote_port);
     this->link_map.erase(remote_ip_port);
+    this->active_links.del(remote_ip_port);
 	delete link;
 }
 
@@ -348,6 +377,7 @@ int NetworkServer::proc_result(ProcJob *job, ready_list_t *ready_list){
 		log_debug("fd: %d, write: %d, delete link", link->fd(), len);
 		goto proc_err;
 	}
+	this->bytes_written += len;
 
 	if(!link->output->empty()){
 		fdes->set(link->fd(), FDEVENT_OUT, 1, link);
@@ -403,6 +433,7 @@ int NetworkServer::proc_client_event(const Fdevent *fde, ready_list_t *ready_lis
 			link->mark_error();
 			return 0;
 		}
+		this->bytes_read += len;
 	}
 	if(fde->events & FDEVENT_OUT){
 		if(link->error()){
@@ -414,6 +445,7 @@ int NetworkServer::proc_client_event(const Fdevent *fde, ready_list_t *ready_lis
 			link->mark_error();
 			return 0;
 		}
+		this->bytes_written += len;
 		if(link->output->empty()){
 			fdes->clr(link->fd(), FDEVENT_OUT);
 		}
@@ -444,7 +476,10 @@ void NetworkServer::proc(ProcJob *job){
 			break;
 		}
 		job->cmd = cmd;
-		
+		if (cmd->name != "client") {
+			job->link->last_cmd = cmd->name;
+        }
+
 		if(cmd->flags & Command::FLAG_THREAD){
 			if(cmd->flags & Command::FLAG_WRITE){
 				job->result = PROC_THREAD;
@@ -474,6 +509,42 @@ void NetworkServer::proc(ProcJob *job){
 	}
 }
 
+/*
+ * event loop will check the idle link, if idle > timeout, just destroy
+ */
+void NetworkServer::destroy_idle_link(){
+    int loop = 0;
+    int64_t current = (int64_t)millitime(); 
+
+    while(loop < 100) {
+        std::string key;
+        int64_t active_time;
+        this->active_links.front(&key, &active_time);
+
+        if (key.empty()) {
+            return;
+        }
+
+        if (active_time + this->timeout > current) {
+            return;
+        }
+
+        Link *link = this->link_map[key];
+
+        if (link == NULL) {
+            log_warn("destroy_idle_link failed, link %s not exit", key.c_str());
+            return;
+        }
+
+        if (link->ref_count == 0) {
+            destroy_link(link); // delete link
+        } else {
+            link->mark_error(); // mark link error
+        }
+        log_info("destroy_idle_link success, destroy idle link %s", key.c_str());
+        loop ++;
+    }
+}
 
 /* built-in procs */
 

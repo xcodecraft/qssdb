@@ -193,10 +193,13 @@ int proc_multi_get(NetworkServer *net, Link *link, const Request &req, Response 
 	CHECK_NUM_PARAMS(2);
 
 	resp->push_back("ok");
+	uint64_t size = 0;
 	for(int i=1; i<req.size(); i++){
 		std::string val;
 		int ret = serv->ssdb->get(req[i], &val);
 		if(ret == 1){
+			size += val.size() + req[i].size();
+			CHECK_OUTPUT_LIMIT(size);
 			resp->push_back(req[i].String());
 			resp->push_back(val);
 		}
@@ -230,7 +233,10 @@ int proc_scan(NetworkServer *net, Link *link, const Request &req, Response *resp
 	uint64_t limit = req[3].Uint64();
 	KIterator *it = serv->ssdb->scan(req[1], req[2], limit);
 	resp->push_back("ok");
+	uint64_t size = 0;
 	while(it->next()){
+		size += it->key.size() + it->val.size();
+		CHECK_OUTPUT_LIMIT(size);
 		resp->push_back(it->key);
 		resp->push_back(it->val);
 	}
@@ -246,7 +252,10 @@ int proc_rscan(NetworkServer *net, Link *link, const Request &req, Response *res
 	uint64_t limit = req[3].Uint64();
 	KIterator *it = serv->ssdb->rscan(req[1], req[2], limit);
 	resp->push_back("ok");
+	uint64_t size = 0;
 	while(it->next()){
+		size += it->key.size() + it->val.size();
+		CHECK_OUTPUT_LIMIT(size);
 		resp->push_back(it->key);
 		resp->push_back(it->val);
 	}
@@ -268,7 +277,10 @@ int proc_keys(NetworkServer *net, Link *link, const Request &req, Response *resp
 	it->return_val(false);
 
 	resp->push_back("ok");
+	uint64_t size = 0;
 	while(it->next()){
+		size += it->key.size();
+		CHECK_OUTPUT_LIMIT(size);
 		resp->push_back(it->key);
 	}
 	delete it;

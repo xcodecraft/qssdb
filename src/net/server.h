@@ -7,6 +7,7 @@ found in the LICENSE file.
 #define NET_SERVER_H_
 
 #include "../include.h"
+#include "../util/sorted_set.h"
 #include <string>
 #include <vector>
 #include <map>
@@ -55,10 +56,15 @@ public:
 	void *data;
 	ProcMap proc_map;
     link_map_t link_map;
+	SortedSet active_links;
 	int link_count;
 	bool need_auth;
 	std::string password;
-    int max_connections;
+	int max_connections;
+	int timeout; // second 
+	uint64_t client_output_limit; // byte 
+	uint64_t bytes_written; // byte 
+	uint64_t bytes_read; // byte 
 
 	~NetworkServer();
 	
@@ -66,7 +72,8 @@ public:
 	static NetworkServer* init(const char *conf_file);
 	static NetworkServer* init(const Config &conf);
 	void serve();
-    void destroy_link(Link *link);
+	void destroy_link(Link *link);
+	void destroy_idle_link();
 };
 
 
