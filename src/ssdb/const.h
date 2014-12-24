@@ -21,6 +21,8 @@ static const int AGGREGATE_MAX_TYPE     = 3;
 
 static const int MIN_LEVELDB_SIZE       = 174;
 
+static const std::string SLAVE_STATUS_PREFIX = "slave.status.";
+
 class DataType{
 public:
 	static const char SYNCLOG	= 1;

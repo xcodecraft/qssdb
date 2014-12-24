@@ -64,6 +64,7 @@ public:
 	void stop();
 		
 	void set_id(const std::string &id);
+	std::string get_id();
 	std::string stats() const;
     std::string get_master_ip() const{
         return master_ip;

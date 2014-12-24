@@ -48,6 +48,8 @@ public:
 	bool in_kv_range(const std::string &key);
 	bool in_kv_range(const Bytes &key);
 
+	int set_repli_status(const std::string &id, const std::string &seq);
+
     int save_kv_stats(bool force=false);
 
     int create_slave(std::string &ip, int port, std::string &type, std::string &id);

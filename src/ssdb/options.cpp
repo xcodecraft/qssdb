@@ -25,10 +25,10 @@ void Options::load(const Config &conf){
 		compression = "yes";
 	}
 	strtolower(&binlog);
-	if(binlog != "yes"){
-		this->binlog = false;
-	}else{
+	if(binlog != "no"){ // default is yes
 		this->binlog = true;
+	}else{
+		this->binlog = false;
 	}
 
 	if(cache_size <= 0){

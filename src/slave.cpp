@@ -83,8 +83,8 @@ std::string Slave::stats() const{
 void Slave::start(){
 	migrate_old_status();
 	load_status();
-	log_debug("last_seq: %" PRIu64 ", last_key: %s",
-		last_seq, hexmem(last_key.data(), last_key.size()).c_str());
+	log_debug("status_key: %s last_seq: %" PRIu64 ", last_key: %s",
+		status_key().c_str(),last_seq, hexmem(last_key.data(), last_key.size()).c_str());
 
 	thread_quit = false;
 	int err = pthread_create(&run_thread_tid, NULL, &Slave::_run_thread, this);
@@ -104,6 +104,10 @@ void Slave::stop(){
 
 void Slave::set_id(const std::string &id){
 	this->id_ = id;
+}
+
+std::string Slave::get_id(){
+    return this->id_;
 }
 
 void Slave::migrate_old_status(){
@@ -133,7 +137,7 @@ void Slave::migrate_old_status(){
 std::string Slave::status_key(){
 	static std::string key;
 	if(key.empty()){
-		key = "slave.status." + this->id_;
+		key = SLAVE_STATUS_PREFIX + this->id_;
 	}
 	return key;
 }
@@ -337,7 +341,7 @@ int Slave::proc_copy(const Binlog &log, const std::vector<Bytes> &req){
 		case BinlogCommand::END:
 			log_info("copy end, copy_count: %" PRIu64 ", last_seq: %" PRIu64 ", seq: %" PRIu64,
 				copy_count, this->last_seq, log.seq());
-            if (!this->is_mirror) { // no master
+            if (!this->is_mirror && this->last_seq > 0) { // no master
                 ssdb->get_binlogs()->update(this->last_seq, BinlogType::NOOP, BinlogCommand::NONE, "", "");
                 ssdb->get_binlogs()->set_last_seq(this->last_seq);
             }

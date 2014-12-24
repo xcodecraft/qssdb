@@ -144,6 +144,8 @@ DEF_PROC(slaveof);
 DEF_PROC(client);
 DEF_PROC(config);
 
+DEF_PROC(repli);
+
 
 #define PROC(c, f)     net->proc_map.set_proc(#c, f, proc_##c)
 
@@ -286,6 +288,8 @@ void SSDBServer::reg_procs(NetworkServer *net){
 	PROC(client, "r");
 	// config must run in the main thread
 	PROC(config, "w");
+	// repli must run in the main thread
+	PROC(repli, "w");
 
 	PROC(ttl, "rt");
 	PROC(expire, "wt");
@@ -466,6 +470,17 @@ bool SSDBServer::in_kv_range(const std::string &key){
 		return false;
 	}
 	return true;
+}
+
+int SSDBServer::set_repli_status(const std::string &id, const std::string &seq) {
+    std::string status_key = SLAVE_STATUS_PREFIX + id;
+
+    meta->hset(status_key, "last_key", "");
+    meta->hset(status_key, "last_seq", seq);
+
+    log_info("set_repli_status status_key: %s last_seq: %s" , status_key.c_str(), seq.c_str());
+
+    return 0;
 }
 
 int SSDBServer::load_kv_stats(){
@@ -773,7 +788,7 @@ int proc_slaveof(NetworkServer *net, Link *link, const Request &req, Response *r
 // slaveof no one
 static int proc_slaveof_noone(NetworkServer *net, Link *link, const Request &req, Response *resp){
     SSDBServer *serv = (SSDBServer *)net->data; 
-    log_info("slaveof no one");
+    log_info("slaveof no one, remote_ip: %s", link->remote_ip);
 
     // destroy slaves
     std::vector<Slave *>::iterator it;
@@ -806,7 +821,7 @@ static int proc_slaveof_master(NetworkServer *net, Link *link, const Request &re
     int status = serv->create_slave(ip, port, type, id);
 
     if (status == 0) {
-        log_info("slaveof %s %d %s %s success", ip.c_str(), port, type.c_str(), id.c_str());
+        log_info("slaveof %s %d %s %s success, remote_ip: %s", ip.c_str(), port, type.c_str(), id.c_str(), link->remote_ip);
         Config *conf = serv->conf->find_child("replication");
         if (conf == NULL) {
             conf = serv->conf->add_child("replication", "");
@@ -821,7 +836,7 @@ static int proc_slaveof_master(NetworkServer *net, Link *link, const Request &re
 
         resp->reply_status(0, NULL);
     } else {
-        log_error("slaveof %s %d %s %s failed", ip.c_str(), port, type.c_str(), id.c_str());
+        log_error("slaveof %s %d %s %s failed, remote_ip: %s", ip.c_str(), port, type.c_str(), id.c_str(), link->remote_ip);
         resp->reply_status(-1, "create slave failed");
     }
     return 0;
@@ -866,7 +881,8 @@ static int proc_client_kill(NetworkServer *net, Link *link, const Request &req, 
         return 0;
     }
 
-    link_map_t::iterator it = net->link_map.find(req[3].String());
+    std::string ip = req[3].String();
+    link_map_t::iterator it = net->link_map.find(ip);
     if (it != net->link_map.end() && it->second != link) {
         if (it->second->ref_count == 0) {
             net->destroy_link(it->second); // delete link
@@ -878,16 +894,20 @@ static int proc_client_kill(NetworkServer *net, Link *link, const Request &req, 
         resp->reply_status(-1,"link not exist");
     }
     
+    log_info("proc_client_kill client_addr: %s remote_ip: %s", ip.c_str(), link->remote_ip);
     return 0;
 }
 
 static int proc_config_rewrite(NetworkServer *net, Link *link, const Request &req, Response *resp);
+static int proc_config_set(NetworkServer *net, Link *link, const Request &req, Response *resp);
 
 int proc_config(NetworkServer *net, Link *link, const Request &req, Response *resp){
     CHECK_NUM_PARAMS(2);
 
     if (req[1] == "rewrite") {
         return proc_config_rewrite(net, link, req, resp);
+    } else if (req[1] == "set") {
+        return proc_config_set(net, link, req, resp);
     } else {
         resp->push_back("client_error");
         resp->push_back("param error");
@@ -920,10 +940,57 @@ static int proc_config_rewrite(NetworkServer *net, Link *link, const Request &re
     
     ret = serv->conf->save(serv->conf_path.c_str());
 	if(ret == -1){
-        resp->reply_status(-1,"conf file rename error");
+        log_error("proc_config_rewrite fail, remote_ip: %s", link->remote_ip);
+        resp->reply_status(-1,"config rewrite error");
     } else {
+        log_info("proc_config_rewrite success, remote_ip: %s", link->remote_ip);
         resp->reply_status(0,NULL);
     }
+
+    return 0;
+}
+
+static int proc_config_set(NetworkServer *net, Link *link, const Request &req, Response *resp) {
+    return 0;
+}
+
+static int proc_repli_set_offset(NetworkServer *net, Link *link, const Request &req, Response *resp);
+
+// replication [options] [args] 
+// for example: replication set_offset id offset 
+int proc_repli(NetworkServer *net, Link *link, const Request &req, Response *resp){
+    CHECK_NUM_PARAMS(2);
+
+    if (req[1] == "set_offset") {
+        CHECK_NUM_PARAMS(4);
+        return proc_repli_set_offset(net, link, req, resp);
+    } else {
+        resp->push_back("client_error");
+        resp->push_back("param error");
+    }
+
+    return 0;
+}
+
+static int proc_repli_set_offset(NetworkServer *net, Link *link, const Request &req, Response *resp){
+	SSDBServer *serv = (SSDBServer *)net->data;
+
+    std::string id = req[2].String();
+    uint64_t seq = req[3].Uint64();
+
+    std::vector<Slave *>::iterator it;
+    for(it = serv->slaves.begin(); it != serv->slaves.end(); it++){
+        Slave *slave = *it;
+        if (slave->get_id() == id) {
+            // don't allow to dynamic update sync offset when the slave is running
+            resp->reply_status(-1,"current slave is running, need stop sync");
+            return 0;
+        }
+    }
+
+    serv->set_repli_status(id, str(seq));
+    resp->reply_status(0,NULL);
+    log_info("proc_repli_set_offset id: %s seq: %" PRIu64 " remote_ip: %s", id.c_str(), seq, link->remote_ip);
 
     return 0;
 }

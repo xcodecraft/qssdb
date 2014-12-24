@@ -64,7 +64,9 @@ int main(int argc, char **argv){
 			exit(1);
 		}
 
-		meta_db = SSDB::open(Options(), meta_db_dir);
+		Options default_option;
+		default_option.binlog = false; // disable 
+		meta_db = SSDB::open(default_option, meta_db_dir);
 		if(!meta_db){
 			log_fatal("could not open meta db: %s", meta_db_dir.c_str());
 			fprintf(stderr, "could not open meta db: %s\n", meta_db_dir.c_str());

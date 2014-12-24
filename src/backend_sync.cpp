@@ -339,7 +339,7 @@ int BackendSync::Client::sync(BinlogQueue *logs){
 		}else{
 			ret = logs->find_next(expect_seq, &log);
 		}
-		if(ret == 0){
+		if(ret <= 0){
 			return 0;
 		}
 		if(this->status == Client::COPY && log.key() > this->last_key){
