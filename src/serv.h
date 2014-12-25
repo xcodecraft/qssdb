@@ -52,7 +52,7 @@ public:
 
     int save_kv_stats(bool force=false);
 
-    int create_slave(std::string &ip, int port, std::string &type, std::string &id);
+    int create_slave(std::string &ip, int port, std::string &type, std::string &id, std::string auth);
     void destroy_all_slaves();
 };
 

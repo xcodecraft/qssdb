@@ -536,6 +536,7 @@ void NetworkServer::destroy_idle_link(){
             return;
         }
 
+
         if (link->ref_count == 0) {
             destroy_link(link); // delete link
         } else {

@@ -342,7 +342,7 @@ SSDBServer::SSDBServer(SSDB *ssdb, SSDB *meta, Config *conf, const std::string &
 				int port = c->get_num("port");
 				std::string type = c->get_str("type");
 				std::string id = c->get_str("id");
-                this->create_slave(ip, port, type, id);
+                this->create_slave(ip, port, type, id, c->get_str("auth"));
 			}
 		}
 	}
@@ -378,7 +378,7 @@ SSDBServer::~SSDBServer(){
 	log_debug("SSDBServer finalized");
 }
 
-int SSDBServer::create_slave(std::string &ip, int port, std::string &type, std::string &id) {
+int SSDBServer::create_slave(std::string &ip, int port, std::string &type, std::string &id, std::string auth) {
     if(port <= 0 || port > 65535){
         log_warn("slaveof: %s:%d, type: %s failed, port should be in (0, 65535)!", ip.c_str(), port, type.c_str());
         return -1;
@@ -413,6 +413,7 @@ int SSDBServer::create_slave(std::string &ip, int port, std::string &type, std::
     if(!id.empty()){
         slave->set_id(id);
     }
+    slave->auth = auth;
     slave->start();
     slaves.push_back(slave);
 
@@ -812,20 +813,21 @@ static int proc_slaveof_noone(NetworkServer *net, Link *link, const Request &req
     return 0;
 }
 
-// slaveof master_ip master_port (mirror|sync) [id]
+// slaveof master_ip master_port (mirror|sync) [id] [auth]
 static int proc_slaveof_master(NetworkServer *net, Link *link, const Request &req, Response *resp){
     SSDBServer *serv = (SSDBServer *)net->data; 
     std::string ip = req[1].String();
     int port = req[2].Int();
     std::string type = req[3].String();
     std::string id = req.size() >= 5 ? req[4].String() : "";
+    std::string auth = req.size() >= 6 ? req[5].String() : "";
 
     if (serv->slaves.size() > 0) {
         log_warn("slaveof %s %d %s %s, slave already exist", ip.c_str(), port, type.c_str(), id.c_str());
         resp->reply_status(-1, "slave already exist");
         return 0;
     }
-    int status = serv->create_slave(ip, port, type, id);
+    int status = serv->create_slave(ip, port, type, id, auth);
 
     if (status == 0) {
         log_info("slaveof %s %d %s %s success, remote_ip: %s", ip.c_str(), port, type.c_str(), id.c_str(), link->remote_ip);

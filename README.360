@@ -1,0 +1,21 @@
+合并记录:
+
+[2] 第2次合并 (2014-12-25)
+
+    git : https://github.com/ideawu/ssdb.git
+    branch: master
+    diff : git diff -r 17a875c05ceca411e224ca00e894560539976430 1b84ec3cca0811b74ebb8c22c7724e58aea95668
+    current git version: 1b84ec3cca0811b74ebb8c22c7724e58aea95668
+    ssdb_version: 1.8.0
+
+    360_ssdb_version: 1.8.0.2
+
+[1] 第1次合并 (2014-11-18)
+
+    git : https://github.com/ideawu/ssdb.git
+    branch: master
+    clone version: 17a875c05ceca411e224ca00e894560539976430
+    current git version: 17a875c05ceca411e224ca00e894560539976430
+    ssdb_version: 1.8.0
+
+    360_ssdb_version: 1.8.0.1
