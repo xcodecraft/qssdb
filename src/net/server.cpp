@@ -254,8 +254,6 @@ void NetworkServer::serve(){
 					//
                 }
 			}else{
-	            Link *link = (Link *)fde->data.ptr;
-                link->ref();
 				proc_client_event(fde, &ready_list);
 			}
 		}
@@ -274,7 +272,9 @@ void NetworkServer::serve(){
 				continue;
 			}
 			if(req->empty()){
+				link->unRef();
 				fdes->set(link->fd(), FDEVENT_IN, 1, link);
+				log_debug("serve parse incomplete request, remote_ip: %s ref: %d", link->remote_ip, link->ref_count);
 				continue;
 			}
 			
@@ -385,6 +385,7 @@ int NetworkServer::proc_result(ProcJob *job, ready_list_t *ready_list){
 	if(link->input->empty()){
 		fdes->set(link->fd(), FDEVENT_IN, 1, link);
         link->unRef();
+        log_debug("proc_result remote_ip: %s ref: %d", link->remote_ip, link->ref_count);
 	}else{
 		fdes->clr(link->fd(), FDEVENT_IN);
 		ready_list->push_back(link);
@@ -422,6 +423,8 @@ So it safe to delete link when processing ready list and async worker result.
 int NetworkServer::proc_client_event(const Fdevent *fde, ready_list_t *ready_list){
 	Link *link = (Link *)fde->data.ptr;
 	if(fde->events & FDEVENT_IN){
+		link->ref();
+		log_debug("proc_client_event remote_ip: %s ref: %d", link->remote_ip, link->ref_count);
 		ready_list->push_back(link);
 		if(link->error()){
 			return 0;
@@ -536,13 +539,17 @@ void NetworkServer::destroy_idle_link(){
             return;
         }
 
+        log_info("destroy_idle_link success, destroy idle link: %s", key.c_str());
 
         if (link->ref_count == 0) {
+            log_debug("destroy_idle_link destroy_link, link: %s", key.c_str());
             destroy_link(link); // delete link
         } else {
+            log_debug("destroy_idle_link mark_error, link: %s", key.c_str());
             link->mark_error(); // mark link error
+            // just for remove from sorted_set head, add 100s
+            this->active_links.add(key,active_time + 100);
         }
-        log_info("destroy_idle_link success, destroy idle link %s", key.c_str());
         loop ++;
     }
 }
