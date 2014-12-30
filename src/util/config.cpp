@@ -213,7 +213,7 @@ int Config::del(const char *key){
 
 	snprintf(path, CONFIG_MAX_LINE, "%s", key);
 
-	char *f, *fs; /* field, field seperator */
+	char *f, *fs; 
 	f = fs = path;
 	while(conf){
 		switch(*fs++){
@@ -226,11 +226,11 @@ int Config::del(const char *key){
 			case '\0':
 			    for(std::vector<Config *>::iterator it = conf->children.begin(); it != conf->children.end();){
                     Config *c = *it;
-                    if(c->key != "slaveof"){
-                        it ++;
-                    } else {
+                    if(c->key == f){
                         delete c;
-                        conf->children.erase(it);
+                        it = conf->children.erase(it);
+                    } else {
+                        it ++;
                     }
                 }
                 return 0;

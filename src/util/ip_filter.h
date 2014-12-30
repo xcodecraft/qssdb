@@ -70,6 +70,15 @@ public:
 		}
 		empty_ = false;
 	}
+    
+	void clear_allow(){
+		allow_all = false;
+		allow.clear();
+
+		if (deny.empty() && !deny_all) {
+			empty_ = true;
+		}
+    }
 	
 	void add_deny(const std::string &ip_prefix){
 		if(ip_prefix == "all" || ip_prefix == "*"){
@@ -81,9 +90,23 @@ public:
 		}
 		empty_ = false;
 	}
+
+	void clear_deny(){
+		deny_all = false;
+		deny.clear();
+
+		if (allow.empty() && !allow_all) {
+			empty_ = true;
+		}
+	}
 	
 	bool check_pass(const std::string &ip){
 		if(empty_){
+			return true;
+		}
+
+		// allow localhost access
+		if (ip == "127.0.0.1") {
 			return true;
 		}
 		// check specified allow/deny

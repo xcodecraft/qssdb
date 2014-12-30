@@ -9,6 +9,7 @@ found in the LICENSE file.
 #include "serv.h"
 #include "net/proc.h"
 #include "net/server.h"
+#include "./util/ip_filter.h"
 
 static size_t memory_used();
 
@@ -287,9 +288,9 @@ void SSDBServer::reg_procs(NetworkServer *net){
 	// client must run in the main thread
 	PROC(client, "r");
 	// config must run in the main thread
-	PROC(config, "w");
+	PROC(config, "r");
 	// repli must run in the main thread
-	PROC(repli, "w");
+	PROC(repli, "r");
 
 	PROC(ttl, "rt");
 	PROC(expire, "wt");
@@ -913,6 +914,7 @@ static int proc_client_kill(NetworkServer *net, Link *link, const Request &req, 
 
 static int proc_config_rewrite(NetworkServer *net, Link *link, const Request &req, Response *resp);
 static int proc_config_set(NetworkServer *net, Link *link, const Request &req, Response *resp);
+static int proc_config_get(NetworkServer *net, Link *link, const Request &req, Response *resp);
 
 int proc_config(NetworkServer *net, Link *link, const Request &req, Response *resp){
     CHECK_NUM_PARAMS(2);
@@ -921,6 +923,8 @@ int proc_config(NetworkServer *net, Link *link, const Request &req, Response *re
         return proc_config_rewrite(net, link, req, resp);
     } else if (req[1] == "set") {
         return proc_config_set(net, link, req, resp);
+    } else if (req[1] == "get") {
+        return proc_config_get(net, link, req, resp);
     } else {
         resp->push_back("client_error");
         resp->push_back("param error");
@@ -969,14 +973,11 @@ static int proc_config_set(NetworkServer *net, Link *link, const Request &req, R
     SSDBServer *serv = (SSDBServer *)net->data;
     std::string name = req[2].String();
 
-    if (name == "server.max_connections" || name == "server.timeout" 
-            || name == "replication.binlog_capacity") {
+    if (name == "server.max_connections" || name == "server.timeout" || name == "replication.binlog_capacity") {
         int val = req[3].Int();
         if (val <= 0) {
             goto err;
         }
-
-        serv->conf->set(name.c_str(), str(val).c_str());
 
         if (name == "server.max_connections") {
             net->max_connections = val;
@@ -985,14 +986,51 @@ static int proc_config_set(NetworkServer *net, Link *link, const Request &req, R
         } else if (name == "replication.binlog_capacity") {
             serv->ssdb->binlogs->set_capacity(val);
         }
+
+        serv->conf->set(name.c_str(), req[3].String().c_str());
     } else if (name == "server.client_output_limit") {
         int64_t val = req[3].Int64();
         if (val <= 0) {
             goto err;
         }
 
-        serv->conf->set(name.c_str(), str(val).c_str());
         net->client_output_limit = val;
+        serv->conf->set(name.c_str(), req[3].String().c_str());
+    } else if (name == "server.allow" || name == "server.deny") {
+        std::string val = req[3].String();
+        std::vector<std::string> ips;
+        str_split(val, ips, ",");
+    
+        if (ips.empty()) {
+            resp->reply_status(-1,"config set failed, server.allow|deny is empty");
+            return 0;
+        }
+
+        serv->conf->del(name.c_str()); // may be multi-configs, so need del 
+        if (name == "server.allow") {
+            net->ip_filter->clear_allow();
+            if (val != "none") {
+                for(std::vector<std::string>::iterator it = ips.begin(); it != ips.end(); it ++) {
+                    net->ip_filter->add_allow(*it);
+                }
+                serv->conf->set(name.c_str(), val.c_str());
+            }
+        } else if (name == "server.deny") {
+            net->ip_filter->clear_deny();
+            if (val != "none") {
+                for(std::vector<std::string>::iterator it = ips.begin(); it != ips.end(); it ++) {
+                    net->ip_filter->add_deny(*it);
+                }
+                serv->conf->set(name.c_str(), val.c_str());
+            }
+        }
+    } else if (name == "server.readonly") {
+        if (req[3].String() == "yes") {
+            net->readonly = true;
+        } else {
+            net->readonly = false;
+        }
+        serv->conf->set(name.c_str(), req[3].String().c_str());
     } else {
         resp->reply_status(-1,"config set failed, param not support");
         return 0;
@@ -1007,6 +1045,18 @@ err:
     snprintf(errmsg, 256, "config set failed, %s(%s) need > 0", name.c_str(),req[3].String().c_str());
     resp->reply_status(-1,errmsg);
     log_error("proc_config_set %s remote_ip: %s", errmsg, link->remote_ip);
+    return 0;
+}
+
+static int proc_config_get(NetworkServer *net, Link *link, const Request &req, Response *resp) {
+    CHECK_NUM_PARAMS(3);
+
+    SSDBServer *serv = (SSDBServer *)net->data;
+    std::string name = req[2].String();
+    std::string val  = serv->conf->get_str(name.c_str());
+
+    resp->push_back("ok");
+    resp->push_back(val);
     return 0;
 }
 

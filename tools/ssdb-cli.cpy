@@ -479,6 +479,14 @@ while(true){
 					print "ok";
 				}
 				break;
+			case 'config':
+				if(args[0] == "get") {
+					print repr_data(resp.data);
+				} else {
+					print repr_data(resp.code);
+				}
+				sys.stderr.write(sprintf('(%.3f sec)\n', time_consume));
+				break;
 			case 'get_key_range':
 				for(i=0; i<len(resp.data); i++){
 					resp.data[i] = repr_data(resp.data[i]);

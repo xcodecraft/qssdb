@@ -1,3 +1,9 @@
+* 1.8.0.3
+	* New features:
+		- Support "config get" command, for example: config get server.timeout
+		- Support readonly config, default is false.
+		- Support dynamic config: server.allow and server.deny
+
 * 1.8.0
 	* New features:
 		- Support SSDB style keys command through redis-cli(2014-12-08)

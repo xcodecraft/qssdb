@@ -15,6 +15,7 @@ found in the LICENSE file.
 #include <inttypes.h>
 #include <string>
 #include <algorithm>
+#include <vector>
 
 
 inline static
@@ -381,6 +382,24 @@ std::string str_slice(const std::string &str, int start, int end){
 		return "";
 	}
 	return str.substr(start, size);
+}
+
+static inline 
+void str_split(const std::string& source, std::vector<std::string>& vector, const std::string& c)
+{
+    std::string::size_type pos1, pos2;
+    pos1 = 0;
+    pos2 = source.find(c);
+
+    while(std::string::npos != pos2){
+        vector.push_back(source.substr(pos1, pos2-pos1));
+        pos1 = pos2 + c.size();
+        pos2 = source.find(c, pos1);
+    }
+
+    if(pos1 != source.length()) {
+        vector.push_back(source.substr(pos1));
+    }
 }
 
 static inline

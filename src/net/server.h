@@ -32,7 +32,6 @@ private:
 
 	//Config *conf;
 	Link *serv_link;
-	IpFilter *ip_filter;
 	Fdevents *fdes;
 
 	Link* accept_link();
@@ -53,6 +52,7 @@ protected:
 	void usage(int argc, char **argv);
 
 public:
+	IpFilter *ip_filter;
 	void *data;
 	ProcMap proc_map;
     link_map_t link_map;
@@ -62,6 +62,7 @@ public:
 	std::string password;
 	int max_connections;
 	int timeout; // second 
+	bool readonly; 
 	uint64_t client_output_limit; // byte 
 	uint64_t bytes_written; // byte 
 	uint64_t bytes_read; // byte 

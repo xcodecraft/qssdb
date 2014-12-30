@@ -45,7 +45,8 @@ NetworkServer::NetworkServer(){
 	link_count = 0;
     max_connections = INT_MAX;
     client_output_limit = 1024 * 1024 * 100;
-    timeout = INT_MAX;;
+    timeout = INT_MAX;
+    readonly = false;
 
     bytes_read = 0;
     bytes_written = 0;
@@ -154,6 +155,13 @@ NetworkServer* NetworkServer::init(const Config &conf){
                     if (timeout > 0) {
                         serv->timeout = timeout;
                     }
+				}
+				if((*it)->key == "readonly"){
+					std::string val = (*it)->str();
+					log_info("    readonly %s", val.c_str());
+					if (val == "yes") {
+					    serv->readonly = true;
+					}
 				}
 			}
 		}
@@ -485,6 +493,10 @@ void NetworkServer::proc(ProcJob *job){
 
 		if(cmd->flags & Command::FLAG_THREAD){
 			if(cmd->flags & Command::FLAG_WRITE){
+				if (this->readonly) {
+				    resp.reply_status(-1, "server is readonly");
+				    break;
+				}
 				job->result = PROC_THREAD;
 				writer->push(*job);
 			}else{
