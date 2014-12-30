@@ -126,14 +126,22 @@ NetworkServer* NetworkServer::init(const Config &conf){
 			std::vector<Config *>::iterator it;
 			for(it = children->begin(); it != children->end(); it++){
 				if((*it)->key == "allow"){
-					const char *ip = (*it)->str();
-					log_info("    allow %s", ip);
-					serv->ip_filter->add_allow(ip);
+					std::string val = (*it)->str();
+					log_info("    allow %s", val.c_str());
+					std::vector<std::string> ips;
+					str_split(val, ips, ",");
+					for(std::vector<std::string>::iterator it = ips.begin(); it != ips.end(); it ++) {
+					    serv->ip_filter->add_allow(*it);
+					}
 				}
 				if((*it)->key == "deny"){
-					const char *ip = (*it)->str();
-					log_info("    deny %s", ip);
-					serv->ip_filter->add_deny(ip);
+					std::string val = (*it)->str();
+					log_info("    deny %s", val.c_str());
+					std::vector<std::string> ips;
+					str_split(val, ips, ",");
+					for(std::vector<std::string>::iterator it = ips.begin(); it != ips.end(); it ++) {
+					    serv->ip_filter->add_deny(*it);
+					}
 				}
 				if((*it)->key == "max_connections"){
 					int max_connections = (*it)->num();
