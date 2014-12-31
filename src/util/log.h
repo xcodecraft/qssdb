@@ -87,6 +87,9 @@ int log_level();
 void set_log_level(int level);
 int log_write(int level, const char *fmt, ...);
 
+int slowlog_open(const char *filename, int level=Logger::LEVEL_WARN,
+	bool is_threadsafe=false, uint64_t rotate_size=0);
+int slowlog_write(int level, const char *fmt, ...);
 
 #ifdef NDEBUG
 	#define log_trace(fmt, args...) do{}while(0)
@@ -106,5 +109,7 @@ int log_write(int level, const char *fmt, ...);
 #define log_fatal(fmt, args...)	\
 	log_write(Logger::LEVEL_FATAL, "%s(%d): " fmt, __FILE__, __LINE__, ##args)
 
+#define slowlog_warn(fmt, args...)	\
+	slowlog_write(Logger::LEVEL_WARN, "%s(%d): " fmt, __FILE__, __LINE__, ##args)
 
 #endif

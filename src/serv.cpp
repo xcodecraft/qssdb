@@ -617,21 +617,14 @@ int proc_dbsize(NetworkServer *net, Link *link, const Request &req, Response *re
 int proc_info(NetworkServer *net, Link *link, const Request &req, Response *resp){
 	SSDBServer *serv = (SSDBServer *)net->data;
 	resp->push_back("ok");
-	resp->push_back("ssdb-server");
-	resp->push_back("version");
-	resp->push_back(SSDB_VERSION);
-	{
-		resp->push_back("links");
-		resp->add(net->link_count);
-	}
+	resp->push_back("# ssdb-server");
+	resp->push_back(str("version:") + SSDB_VERSION);
     {
         // cpu stat
         struct rusage ru;
         getrusage(RUSAGE_SELF, &ru);
-        resp->push_back("used_cpu_sys");
-        resp->add((double)ru.ru_stime.tv_sec+(double)ru.ru_stime.tv_usec/1000000);
-        resp->push_back("used_cpu_user");
-        resp->add((double)ru.ru_utime.tv_sec+(double)ru.ru_utime.tv_usec/1000000);
+        resp->push_back("used_cpu_sys:" + str((double)ru.ru_stime.tv_sec+(double)ru.ru_stime.tv_usec/1000000));
+        resp->push_back("used_cpu_user:" + str((double)ru.ru_utime.tv_sec+(double)ru.ru_utime.tv_usec/1000000));
         
         // memory stat
         int64_t rss = memory_used();
@@ -643,33 +636,36 @@ int proc_info(NetworkServer *net, Link *link, const Request &req, Response *resp
         } else {
             snprintf(rss_human, sizeof(rss_human), "%ld B", rss);
         }
-        resp->push_back("used_memory");
-        resp->add(rss);
-        resp->push_back("used_memory_human");
-        resp->push_back(rss_human);
-    }
-    {
+        resp->push_back("used_memory:" + str(rss));
+        resp->push_back("used_memory_human:" + str(rss_human));
+
         // network in/out 
-        resp->push_back("bytes_read");
-        resp->add((int64_t)net->bytes_read);
-        resp->push_back("bytes_written");
-        resp->add((int64_t)net->bytes_written);
+        resp->push_back("bytes_read:" + str((int64_t)net->bytes_read));
+        resp->push_back("bytes_written:" + str((int64_t)net->bytes_written));
     }
+
+	resp->push_back("# stats");
 	{
-		int64_t calls = 0;
+		resp->push_back("links:" + str(net->link_count));
+	}
+	{
+		int64_t calls = 0, write_calls = 0;
 		proc_map_t::iterator it;
 		for(it=net->proc_map.begin(); it!=net->proc_map.end(); it++){
 			Command *cmd = it->second;
 			calls += cmd->calls;
+			if(cmd->flags & Command::FLAG_WRITE){
+			    write_calls += cmd->calls;
+            }
 		}
-		resp->push_back("total_calls");
-		resp->add(calls);
+		resp->push_back("total_calls:" + str(calls));
+		resp->push_back("write_calls:" + str(write_calls));
+		resp->push_back("read_calls:" + str(calls - write_calls));
 	}
 	
 	{
 		uint64_t size = serv->ssdb->size();
-		resp->push_back("dbsize");
-		resp->push_back(str(size));
+		resp->push_back("dbsize:" + str(size));
         std::string kv_start(1,DataType::KV-1);
         std::string kv_end(1,DataType::KV+1);
 		uint64_t kv_total_size = serv->ssdb->size(kv_start,kv_end);
@@ -677,81 +673,77 @@ int proc_info(NetworkServer *net, Link *link, const Request &req, Response *resp
         if (serv->ssdb->kv_count != 0) {
             kv_count = kv_total_size / (serv->ssdb->kv_size / serv->ssdb->kv_count + MIN_LEVELDB_SIZE);
         }
-		resp->push_back("kv_update_size"); // total add/update count
-		resp->push_back(str(serv->ssdb->kv_size));
-		resp->push_back("kv_update_count"); // total add/update count
-		resp->push_back(str(serv->ssdb->kv_count));
-		resp->push_back("kv_count");
-		resp->push_back(str(kv_count));
-		resp->push_back("hash_count");
-		resp->push_back(str(serv->ssdb->hash_count));
-		resp->push_back("zset_count");
-		resp->push_back(str(serv->ssdb->zset_count));
-		resp->push_back("queue_count");
-		resp->push_back(str(serv->ssdb->queue_count));
+		resp->push_back("kv_update_size:" + str(serv->ssdb->kv_size)); // total add/update count
+		resp->push_back("kv_update_count:" + str(serv->ssdb->kv_count)); // total add/update count
+		resp->push_back("kv_count:" + str(kv_count));
+		resp->push_back("hash_count:" + str(serv->ssdb->hash_count));
+		resp->push_back("zset_count:" + str(serv->ssdb->zset_count));
+		resp->push_back("list_count:" + str(serv->ssdb->queue_count));
 	}
 
+	resp->push_back("# binlog");
 	{
 		std::string s = serv->ssdb->binlogs->stats();
-		resp->push_back("binlogs");
 		resp->push_back(s);
 	}
+
+	resp->push_back("# slaves");
 	{
 		std::vector<std::string> syncs = serv->backend_sync->stats();
+		resp->push_back("connected_slaves:" + str(syncs.size()));
 		std::vector<std::string>::iterator it;
+		int count = 0;
 		for(it = syncs.begin(); it != syncs.end(); it++){
 			std::string s = *it;
-			resp->push_back("replication");
-			resp->push_back(s);
+			resp->push_back("repl_client" + str(count++) + ":" + s);
 		}
 	}
+
+	resp->push_back("# masters");
 	{
 		std::vector<Slave *>::iterator it;
 		for(it = serv->slaves.begin(); it != serv->slaves.end(); it++){
 			Slave *slave = *it;
 			std::string s = slave->stats();
-			resp->push_back("replication");
-			resp->push_back(s);
+			resp->push_back("repl_slaveof:" + s);
 		}
 	}
 
 	if(req.size() == 1 || req[1] == "range"){
+		resp->push_back("# key_range");
 		std::vector<std::string> tmp;
 		int ret = serv->ssdb->key_range(&tmp);
 		if(ret == 0){
 			char buf[512];
 			
-			resp->push_back("key_range.kv");
 			snprintf(buf, sizeof(buf), "\"%s\" - \"%s\"",
 				hexmem(tmp[0].data(), tmp[0].size()).c_str(),
 				hexmem(tmp[1].data(), tmp[1].size()).c_str()
 				);
-			resp->push_back(buf);
+			resp->push_back(str("key_range.kv:\t") + buf);
 			
-			resp->push_back("key_range.hash");
 			snprintf(buf, sizeof(buf), "\"%s\" - \"%s\"",
 				hexmem(tmp[2].data(), tmp[2].size()).c_str(),
 				hexmem(tmp[3].data(), tmp[3].size()).c_str()
 				);
-			resp->push_back(buf);
+			resp->push_back(str("key_range.hash:\t") + buf);
 			
-			resp->push_back("key_range.zset");
 			snprintf(buf, sizeof(buf), "\"%s\" - \"%s\"",
 				hexmem(tmp[4].data(), tmp[4].size()).c_str(),
 				hexmem(tmp[5].data(), tmp[5].size()).c_str()
 				);
-			resp->push_back(buf);
+			resp->push_back(str("key_range.zset:\t") + buf);
 			
-			resp->push_back("key_range.list");
 			snprintf(buf, sizeof(buf), "\"%s\" - \"%s\"",
 				hexmem(tmp[6].data(), tmp[6].size()).c_str(),
 				hexmem(tmp[7].data(), tmp[7].size()).c_str()
 				);
-			resp->push_back(buf);
+			resp->push_back(str("key_range.list:\t") + buf);
 		}
 	}
 
-	if(req.size() == 1 || req[1] == "leveldb"){
+	if(req.size() > 1 && req[1] == "leveldb"){
+		resp->push_back("# leveldb");
 		std::vector<std::string> tmp = serv->ssdb->info();
 		for(int i=0; i<(int)tmp.size(); i++){
 			std::string block = tmp[i];
@@ -760,14 +752,14 @@ int proc_info(NetworkServer *net, Link *link, const Request &req, Response *resp
 	}
 
 	if(req.size() > 1 && req[1] == "cmd"){
+		resp->push_back("# cmd");
 		proc_map_t::iterator it;
 		for(it=net->proc_map.begin(); it!=net->proc_map.end(); it++){
 			Command *cmd = it->second;
-			resp->push_back("cmd." + cmd->name);
 			char buf[128];
-			snprintf(buf, sizeof(buf), "calls: %" PRIu64 "\ttime_wait: %.0f\ttime_proc: %.0f",
+			snprintf(buf, sizeof(buf), "calls=%" PRIu64 ",time_wait=%.0f,time_proc=%.0f",
 				cmd->calls, cmd->time_wait, cmd->time_proc);
-			resp->push_back(buf);
+			resp->push_back("cmd." + cmd->name + ":\t" + buf);
 		}
 	}
 	
@@ -973,7 +965,8 @@ static int proc_config_set(NetworkServer *net, Link *link, const Request &req, R
     SSDBServer *serv = (SSDBServer *)net->data;
     std::string name = req[2].String();
 
-    if (name == "server.max_connections" || name == "server.timeout" || name == "replication.binlog_capacity") {
+    if (name == "server.max_connections" || name == "server.timeout" 
+            || name == "server.slow_time" || name == "replication.binlog_capacity") {
         int val = req[3].Int();
         if (val <= 0) {
             goto err;
@@ -983,6 +976,8 @@ static int proc_config_set(NetworkServer *net, Link *link, const Request &req, R
             net->max_connections = val;
         } else if (name == "server.timeout") {
             net->timeout = val;
+        } else if (name == "server.slow_time") {
+            net->slow_time = val / 1000.0;
         } else if (name == "replication.binlog_capacity") {
             serv->ssdb->binlogs->set_capacity(val);
         }

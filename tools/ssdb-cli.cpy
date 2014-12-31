@@ -459,14 +459,11 @@ while(true){
 				sys.stderr.write(sprintf('%d result(s) (%.3f sec)\n', len(resp.data), time_consume));
 				break;
 			case 'info':
-				is_val = false;
-				for(i=1; i<len(resp.data); i++){
-					s = resp.data[i];
-					if(is_val){
-						s = '    ' + s.replace('\n', '\n    ');
+				for(i=0; i<len(resp.data); i++){
+					if(resp.data[i].startswith("#"){
+						print "";
 					}
-					print s;
-					is_val = !is_val;
+					print resp.data[i];
 				}
 				sys.stderr.write(sprintf('%d result(s) (%.3f sec)\n', len(resp.data), time_consume));
 				break;

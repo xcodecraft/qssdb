@@ -46,6 +46,7 @@ NetworkServer::NetworkServer(){
     max_connections = INT_MAX;
     client_output_limit = 1024 * 1024 * 100;
     timeout = INT_MAX;
+    slow_time = 0.5;
     readonly = false;
 
     bytes_read = 0;
@@ -169,6 +170,13 @@ NetworkServer* NetworkServer::init(const Config &conf){
 					log_info("    readonly %s", val.c_str());
 					if (val == "yes") {
 					    serv->readonly = true;
+					}
+				}
+				if((*it)->key == "slow_time"){
+					int slow_time = (*it)->num();
+					log_info("    slow_time %d", slow_time);
+					if (slow_time > 0) {
+					    serv->slow_time = slow_time / 1000.0;
 					}
 				}
 			}
@@ -377,6 +385,13 @@ int NetworkServer::proc_result(ProcJob *job, ready_list_t *ready_list){
 		job->cmd->calls += 1;
 		job->cmd->time_wait += job->time_wait;
 		job->cmd->time_proc += job->time_proc;
+
+		double total_time = job->time_wait + job->time_proc;
+		if (total_time >= this->slow_time) {
+		    slowlog_warn("proc slow, remote_ip: %s wait: %.3f proc: %.3f total: %.3f req: %s", 
+                    link->remote_ip, job->time_wait, job->time_proc, total_time, 
+			        serialize_req(*link->last_recv()).c_str());
+		}
 	}
 	if(job->result == PROC_ERROR){
 		log_info("fd: %d, proc error, delete link", link->fd());

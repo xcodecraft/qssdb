@@ -50,33 +50,34 @@ Slave::~Slave(){
 
 std::string Slave::stats() const{
 	std::string s;
-	s.append("slaveof " + master_ip + ":" + str(master_port) + "\n");
-	s.append("    id         : " + id_ + "\n");
+	s.append("ip=" + master_ip);
+	s.append(",port=" + str(master_port));
+	s.append(",id=" + id_);
 	if(is_mirror){
-		s.append("    type       : mirror\n");
+		s.append(",type=mirror");
 	}else{
-		s.append("    type       : sync\n");
+		s.append(",type=sync");
 	}
 
-	s.append("    status     : ");
+	s.append(",status=");
 	switch(status){
 	case DISCONNECTED:
-		s.append("DISCONNECTED\n");
+		s.append("DISCONNECTED");
 		break;
 	case INIT:
-		s.append("INIT\n");
+		s.append("INIT");
 		break;
 	case COPY:
-		s.append("COPY\n");
+		s.append("COPY");
 		break;
 	case SYNC:
-		s.append("SYNC\n");
+		s.append("SYNC");
 		break;
 	}
 
-	s.append("    last_seq   : " + str(last_seq) + "\n");
-	s.append("    copy_count : " + str(copy_count) + "\n");
-	s.append("    sync_count : " + str(sync_count) + "");
+	s.append(",last_seq=" + str(last_seq));
+	s.append(",copy_count=" + str(copy_count));
+	s.append(",sync_count=" + str(sync_count));
 	return s;
 }
 

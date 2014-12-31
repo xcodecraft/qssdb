@@ -177,20 +177,39 @@ void init(){
 	
 	std::string log_output;
 	std::string log_level;
+	std::string slowlog_output;
+	std::string slowlog_level;
 	int log_rotate_size = 0;
 	{ // logger
 		log_level = conf->get_str("logger.level");
 		if(log_level.empty()){
 			log_level = "debug";
 		}
+		slowlog_level = conf->get_str("logger.slowlog_level");
+		if(slowlog_level.empty()){
+			slowlog_level = "info";
+		}
 		int level = Logger::get_level(log_level.c_str());
+		int slow_level = Logger::get_level(slowlog_level.c_str());
 		log_rotate_size = conf->get_num("logger.rotate.size");
 		log_output = conf->get_str("logger.output");
 		if(log_output == ""){
 			log_output = "stdout";
 		}
+		slowlog_output = conf->get_str("logger.slowlog");
+		if(slowlog_output == "") {
+			slowlog_output = log_output;
+			if (slowlog_output != "stdout") {
+			    slowlog_output.append(".slow");
+            }
+		}
+
 		if(log_open(log_output.c_str(), level, true, log_rotate_size) == -1){
 			fprintf(stderr, "error opening log file: %s\n", log_output.c_str());
+			exit(1);
+		}
+		if(slowlog_open(slowlog_output.c_str(), slow_level, true, log_rotate_size) == -1){
+			fprintf(stderr, "error opening slowlog file: %s\n", slowlog_output.c_str());
 			exit(1);
 		}
 	}

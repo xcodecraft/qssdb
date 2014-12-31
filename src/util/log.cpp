@@ -6,6 +6,7 @@ found in the LICENSE file.
 #include "log.h"
 
 static Logger logger;
+static Logger slowLogger;
 
 int log_open(FILE *fp, int level, bool is_threadsafe){
 	return logger.open(fp, level, is_threadsafe);
@@ -13,6 +14,10 @@ int log_open(FILE *fp, int level, bool is_threadsafe){
 
 int log_open(const char *filename, int level, bool is_threadsafe, uint64_t rotate_size){
 	return logger.open(filename, level, is_threadsafe, rotate_size);
+}
+
+int slowlog_open(const char *filename, int level, bool is_threadsafe, uint64_t rotate_size){
+	return slowLogger.open(filename, level, is_threadsafe, rotate_size);
 }
 
 int log_level(){
@@ -27,6 +32,14 @@ int log_write(int level, const char *fmt, ...){
 	va_list ap;
 	va_start(ap, fmt);
 	int ret = logger.logv(level, fmt, ap);
+	va_end(ap);
+	return ret;
+}
+
+int slowlog_write(int level, const char *fmt, ...){
+	va_list ap;
+	va_start(ap, fmt);
+	int ret = slowLogger.logv(level, fmt, ap);
 	va_end(ap);
 	return ret;
 }

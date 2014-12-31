@@ -62,6 +62,7 @@ public:
 	std::string password;
 	int max_connections;
 	int timeout; // second 
+	double slow_time; // second
 	bool readonly; 
 	uint64_t client_output_limit; // byte 
 	uint64_t bytes_written; // byte 
