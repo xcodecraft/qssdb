@@ -36,6 +36,7 @@ class Config{
 		int depth;
 
 		Config* build_key_path(const char *key);
+		void get_all_kv(const std::string &parent, const Config *config, std::vector<std::string> &vector) const;
 	public:
 		Config(const char *key=NULL, const char *val=NULL);
 		~Config();
@@ -57,6 +58,15 @@ class Config{
 		int get_num(const char *key) const;
 		const char* str() const;
 		const char* get_str(const char *key) const;
+        
+		/* for example:
+         *      vector:
+         *          server.ip
+         *          127.0.0.1
+         *          server.port
+         *          8888
+         * */
+		void get_all_kv(std::vector<std::string> &vector) const;
 
 		bool is_comment() const{
 			return key[0] == '#';

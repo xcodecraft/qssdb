@@ -38,19 +38,22 @@ function show_command_help(){
 function usage(){
 	print '';
 	print 'Usage:';
-	print '	ssdb-cli [-h] [HOST] [-p] [PORT]';
+	print '	ssdb-cli [-h] [HOST] [-p] [PORT] [-a] [password] [cmd]';
 	print '';
 	print 'Options:';
 	print '	-h 127.0.0.1';
 	print '		ssdb server hostname/ip address';
 	print '	-p 8888';
 	print '		ssdb server port';
+	print '	-a password';
+	print '		ssdb server auth';
 	print '';
 	print 'Examples:';
 	print '	ssdb-cli';
-	print '	ssdb-cli 8888';
-	print '	ssdb-cli 127.0.0.1 8888';
-	print '	ssdb-cli -h 127.0.0.1 -p 8888';
+	print '	ssdb-cli set hello world';
+	print '	ssdb-cli get hello';
+	print '	ssdb-cli -h 127.0.0.1 -p 8888 -a password';
+	print '	ssdb-cli -h 127.0.0.1 -p 8888 -a password info';
 }
 
 function repr_data(s){
@@ -72,18 +75,27 @@ function timespan(stime){
 function show_version(){
 	try{
 		resp = link.request('info', []);
-		sys.stderr.write('server version: ' + resp.data[2] + '\n\n');
+		sys.stderr.write(resp.data[1] + '\n\n');
 	}catch(Exception e){
 	}
 }
 
-
-host = '';
-port = '';
+host = '127.0.0.1';
+port = '8888';
+password = false;
 opt = '';
-args = [];
+ps = [];
+quiet = false;
 foreach(sys.argv[1 ..] as arg){
+    if (len(ps) > 0) {
+		ps.append(arg);
+        continue;
+    }
 	if(opt == '' && arg.startswith('-')){
+		if(arg == '--help') {
+           usage();
+           sys.exit(0);
+		}
 		opt = arg;
 	}else{
 		switch(opt){
@@ -95,28 +107,14 @@ foreach(sys.argv[1 ..] as arg){
 				port = arg;
 				opt = '';
 				break;
-			default:
-				args.append(arg);
+			case '-a':
+				password = arg;
+				opt = '';
 				break;
-		}
-	}
-}
-
-if(host == ''){
-	host = '127.0.0.1';
-	foreach(args as arg){
-		if(!re.match('^[0-9]+$', args[0])){
-			host = arg;
-			break;
-		}
-	}
-}
-if(port == ''){
-	port = '8888';
-	foreach(args as arg){
-		if(re.match('^[0-9]+$', args[0])){
-			port = arg;
-			break;
+			default:
+				ps.append(arg);
+				quiet = true;
+				break;
 		}
 	}
 }
@@ -136,54 +134,71 @@ import SSDB.SSDB;
 
 try{
 	link = new SSDB(host, port);
+    if(password) {
+      resp = link.request('auth', [password]);
+      if(!resp.ok()){
+           s = resp.code;
+           if(resp.message){
+               s += ': ' + resp.message;
+           }
+           sys.stderr.write(str(s) + '\n');
+           sys.exit(0);
+      }
+    }
 }catch(socket.error e){
 	sys.stderr.write(sprintf('Failed to connect to: %s:%d\n', host, port));
 	sys.stderr.write(sprintf('Connection error: %s\n', str(e)));
 	sys.exit(0);
 }
 
-welcome();
-if(sys.stdin.isatty()){
-	show_version();
+if(!quiet){
+    welcome();
+    if(sys.stdin.isatty()){
+      show_version();
+    }
 }
 
+stop = false;
 
-password = false;
-
-while(true){
-	line = '';
-	c = sprintf('ssdb %s:%s> ', host, str(port));
-	b = sys.stdout;
-	sys.stdout = sys.stderr;
-	try{
+while(!stop){
+    if (!quiet) {
+      line = '';
+      c = sprintf('ssdb %s:%s> ', host, str(port));
+      b = sys.stdout;
+      sys.stdout = sys.stderr;
+      try{
 		line = raw_input(c);
-	}catch(Exception e){
+      }catch(Exception e){
 		break;
-	}
-	sys.stdout = b;
+      }
+      sys.stdout = b;
 	
-	if(line == ''){
+      if(line == ''){
 		continue;
-	}
-	line = line.strip();
-	if(line == 'q' || line == 'quit'){
+      }
+      line = line.strip();
+      if(line == 'q' || line == 'quit'){
 		sys.stderr.write('bye.\n');
 		break;
-	}
-	if(line == 'h' || line == 'help'){
+      }
+      if(line == 'h' || line == 'help'){
 		show_command_help();
 		continue;
-	}
+      }
 
-	try{
+      try{
 		ps = shlex.split(line);
-	}catch(Exception e){
+      }catch(Exception e){
 		sys.stderr.write(sprintf('error: %s\n', str(e)));
 		continue;
-	}
-	if(len(ps) == 0){
+      }
+      if(len(ps) == 0){
 		continue;
-	}
+      }
+    } else {
+      stop=true;
+    }
+
 	cmd = ps[0].lower();
 	if(cmd.startswith(':')){
 		ps[0] = cmd[1 ..];
@@ -460,7 +475,7 @@ while(true){
 				break;
 			case 'info':
 				for(i=0; i<len(resp.data); i++){
-					if(resp.data[i].startswith("#"){
+					if(resp.data[i].startswith("#")){
 						print "";
 					}
 					print resp.data[i];
@@ -478,7 +493,9 @@ while(true){
 				break;
 			case 'config':
 				if(args[0] == "get") {
-					print repr_data(resp.data);
+					for(i=0; i<len(resp.data); i++){
+						print resp.data[i];
+					}
 				} else {
 					print repr_data(resp.code);
 				}

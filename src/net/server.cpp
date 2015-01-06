@@ -19,6 +19,10 @@ static DEF_PROC(auth);
 #define TICK_INTERVAL          100 // ms
 #define STATUS_REPORT_TICKS    (300 * 1000/TICK_INTERVAL) // second
 
+#define DEFAULT_SLOW_TIME       10 // 10 ms
+#define DEFAULT_TIMEOUT         INT_MAX // not timeout
+#define DEFAULT_OUTPUT_LIMIT    (1024 * 1024 * 100) // 100 MB
+
 volatile bool quit = false;
 volatile uint32_t g_ticks = 0;
 
@@ -44,9 +48,9 @@ NetworkServer::NetworkServer(){
 	serv_link = NULL;
 	link_count = 0;
     max_connections = INT_MAX;
-    client_output_limit = 1024 * 1024 * 100;
-    timeout = INT_MAX;
-    slow_time = 0.5;
+    client_output_limit = DEFAULT_OUTPUT_LIMIT;
+    timeout = DEFAULT_TIMEOUT;
+    slow_time = DEFAULT_SLOW_TIME;
     readonly = false;
 
     bytes_read = 0;
@@ -176,7 +180,7 @@ NetworkServer* NetworkServer::init(const Config &conf){
 					int slow_time = (*it)->num();
 					log_info("    slow_time %d", slow_time);
 					if (slow_time > 0) {
-					    serv->slow_time = slow_time / 1000.0;
+					    serv->slow_time = slow_time;
 					}
 				}
 			}
@@ -200,11 +204,6 @@ NetworkServer* NetworkServer::init(const Config &conf){
 
 		std::string password;
 		password = conf.get_str("server.auth");
-		if(password.size() && (password.size() < 32 || password == "very-strong-password")){
-			log_fatal("weak password is not allowed!");
-			fprintf(stderr, "WARNING! Weak password is not allowed!\n");
-			exit(1);
-		}
 		if(password.empty()){
 			log_info("auth: off");
 		}else{

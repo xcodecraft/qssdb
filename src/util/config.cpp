@@ -303,3 +303,25 @@ int Config::save(const char *filename) const{
 	return 0;
 }
 
+void Config::get_all_kv(const std::string &key, const Config *config, std::vector<std::string> &vector) const {
+    if (config->is_comment()) {
+        return;
+    }
+
+    if (config->children.empty()) {
+        // key: server.ip etc.
+        vector.push_back(key);
+        vector.push_back(config->val);
+        return;
+    }
+
+	for(int i = 0; i < (int)config->children.size(); i++){
+        get_all_kv(key + "." + config->children[i]->key, config->children[i], vector);
+    }
+}
+
+void Config::get_all_kv(std::vector<std::string> &vector) const {
+	for(int i = 0; i < (int)children.size(); i++){
+        get_all_kv(children[i]->key, children[i], vector);
+	}
+}

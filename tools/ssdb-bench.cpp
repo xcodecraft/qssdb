@@ -14,6 +14,7 @@ found in the LICENSE file.
 #include "net/link.h"
 #include "net/fde.h"
 #include "util/log.h"
+#include "util/strings.h"
 #include "version.h"
 
 #include "../src/include.h"
@@ -29,6 +30,7 @@ std::map<std::string, Data *> *ds;
 Fdevents *fdes;
 std::vector<Link *> *free_links;
 
+std::vector<std::string> test_cases;
 
 void welcome(){
 	printf("ssdb-bench - SSDB benchmark tool, %s\n", SSDB_VERSION);
@@ -38,18 +40,42 @@ void welcome(){
 
 void usage(int argc, char **argv){
 	printf("Usage:\n");
-	printf("    %s [ip] [port] [requests] [clients]\n", argv[0]);
+	printf("    %s [-h host] [-p port] [-n requests] [-c clients] [-s size] [-t test_cases] [-s size]\n", argv[0]);
 	printf("\n");
 	printf("Options:\n");
 	printf("    ip          server ip (default 127.0.0.1)\n");
 	printf("    port        server port (default 8888)\n");
 	printf("    requests    Total number of requests (default 10000)\n");
 	printf("    clients     Number of parallel connections (default 50)\n");
+	printf("    size        Size of item\n");
+	printf("    test_case   change the test_case to run, default is all. for example: set or set,get or set,get,hset,hget\n");
 	printf("\n");
 }
 
-void init_data(int num){
+bool is_test_case(std::string cmd){
+    if (test_cases.empty()) {
+        // all case
+        return true;
+    }
+
+    for(std::vector<std::string>::iterator it = test_cases.begin(); it != test_cases.end(); it ++) {
+        if (*it == cmd) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void init_data(int num, int size){
 	srand(time(NULL));
+    char buf[32];
+    snprintf(buf,sizeof(buf),"%d",size);
+    std::string tmp;
+    tmp.append("%0");
+    tmp.append(buf);
+    tmp.append("d");
+    
 	ds = new std::map<std::string, Data *>();
 	while(ds->size() < num){
 		Data *d = new Data();
@@ -58,11 +84,11 @@ void init_data(int num){
 		int n = rand();
 		snprintf(buf, sizeof(buf), "%d", n);
 		d->num = buf;
-		snprintf(buf, sizeof(buf), "k%010d", n);
+		snprintf(buf, sizeof(buf), "%ld", ds->size());
 		d->key = buf;
-		snprintf(buf, sizeof(buf), "v%0100d", n);
+		snprintf(buf, sizeof(buf), tmp.c_str(), n);
 		d->val = buf;
-		ds->insert(make_pair(d->key, d));
+		ds->insert(make_pair(d->num, d));
 	}
 }
 
@@ -112,6 +138,10 @@ void send_req(Link *link, const std::string &cmd, const Data *d){
 }
 
 void bench(std::string cmd){
+	if (!is_test_case(cmd)) {
+		return;
+	}
+
 	int total = (int)ds->size();
 	int finished = 0;
 	int num_sent = 0;
@@ -178,34 +208,45 @@ void bench(std::string cmd){
 	}
 }
 
+
 int main(int argc, char **argv){
 	const char *ip = "127.0.0.1";
 	int port = 8888;
 	int requests = 10000;
 	int clients = 50;
+	int size = 100;
 
 	welcome();
 	usage(argc, argv);
+    
+	if((argc - 1) % 2 != 0) {
+	    printf("Param error***************************\n");
+        exit(0);
+    }
+
 	for(int i=1; i<argc; i++){
 		if(strcmp("-v", argv[i]) == 0){
 			exit(0);
-		}
-	}
-	if(argc > 1){
-		ip = argv[1];
-	}
-	if(argc > 2){
-		port = atoi(argv[2]);
-	}
-	if(argc > 3){
-		requests = atoi(argv[3]);
-	}
-	if(argc > 4){
-		clients = atoi(argv[4]);
+		} else if(strcmp("-p", argv[i]) == 0) {
+            port = atoi(argv[++i]);
+        } else if(strcmp("-h", argv[i]) == 0) {
+            ip = argv[++i];
+        } else if(strcmp("-c", argv[i]) == 0) {
+            clients = atoi(argv[++i]);
+        } else if(strcmp("-n", argv[i]) == 0) {
+            requests = atoi(argv[++i]);
+        } else if(strcmp("-n", argv[i]) == 0) {
+            size = atoi(argv[++i]);
+        } else if(strcmp("-t", argv[i]) == 0) {
+            str_split(argv[++i], test_cases, ","); 
+        } else {
+	        printf("Param error***************************\n");
+            exit(0);
+        }
 	}
 
 	//printf("preparing data...\n");
-	init_data(requests);
+	init_data(requests, size);
 	//printf("preparing links...\n");
 	init_links(clients, ip, port);
 
@@ -223,7 +264,7 @@ int main(int argc, char **argv){
 
 	bench("qpush");
 	bench("qpop");
-	
+    
 	printf("\n");
 
 	return 0;

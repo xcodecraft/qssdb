@@ -614,9 +614,28 @@ int proc_dbsize(NetworkServer *net, Link *link, const Request &req, Response *re
 	return 0;
 }
 
+static int proc_info_base(NetworkServer *net, Link *link, const Request &req, Response *resp);
+static int proc_info_leveldb(NetworkServer *net, Link *link, const Request &req, Response *resp);
+static int proc_info_cmd(NetworkServer *net, Link *link, const Request &req, Response *resp);
+
 int proc_info(NetworkServer *net, Link *link, const Request &req, Response *resp){
-	SSDBServer *serv = (SSDBServer *)net->data;
 	resp->push_back("ok");
+
+	if(req.size() > 1) {
+        if(req[1] == "leveldb") {
+            return proc_info_leveldb(net,link,req,resp);
+        } else if(req[1] == "cmd"){
+            return proc_info_cmd(net,link,req,resp);
+        }
+	} else {
+        return proc_info_base(net,link,req,resp);
+	}
+
+	return 0;
+}
+
+int proc_info_base(NetworkServer *net, Link *link, const Request &req, Response *resp){
+	SSDBServer *serv = (SSDBServer *)net->data;
 	resp->push_back("# ssdb-server");
 	resp->push_back(str("version:") + SSDB_VERSION);
     {
@@ -742,26 +761,32 @@ int proc_info(NetworkServer *net, Link *link, const Request &req, Response *resp
 		}
 	}
 
-	if(req.size() > 1 && req[1] == "leveldb"){
-		resp->push_back("# leveldb");
-		std::vector<std::string> tmp = serv->ssdb->info();
-		for(int i=0; i<(int)tmp.size(); i++){
-			std::string block = tmp[i];
-			resp->push_back(block);
-		}
-	}
+	return 0;
+}
 
-	if(req.size() > 1 && req[1] == "cmd"){
-		resp->push_back("# cmd");
-		proc_map_t::iterator it;
-		for(it=net->proc_map.begin(); it!=net->proc_map.end(); it++){
-			Command *cmd = it->second;
-			char buf[128];
-			snprintf(buf, sizeof(buf), "calls=%" PRIu64 ",time_wait=%.0f,time_proc=%.0f",
-				cmd->calls, cmd->time_wait, cmd->time_proc);
-			resp->push_back("cmd." + cmd->name + ":\t" + buf);
-		}
-	}
+static int proc_info_leveldb(NetworkServer *net, Link *link, const Request &req, Response *resp){
+	SSDBServer *serv = (SSDBServer *)net->data;
+
+    resp->push_back("# leveldb");
+    std::vector<std::string> tmp = serv->ssdb->info();
+    for(int i=0; i<(int)tmp.size(); i++){
+        std::string block = tmp[i];
+        resp->push_back(block);
+    }
+
+	return 0;
+}
+
+static int proc_info_cmd(NetworkServer *net, Link *link, const Request &req, Response *resp){
+    resp->push_back("# cmd");
+    proc_map_t::iterator it;
+    for(it=net->proc_map.begin(); it!=net->proc_map.end(); it++){
+        Command *cmd = it->second;
+        char buf[128];
+        snprintf(buf, sizeof(buf), "calls=%" PRIu64 ",time_wait=%.0f,time_proc=%.0f",
+            cmd->calls, cmd->time_wait, cmd->time_proc);
+        resp->push_back("cmd." + cmd->name + ":\t" + buf);
+    }
 	
 	return 0;
 }
@@ -968,7 +993,7 @@ static int proc_config_set(NetworkServer *net, Link *link, const Request &req, R
     if (name == "server.max_connections" || name == "server.timeout" 
             || name == "server.slow_time" || name == "replication.binlog_capacity") {
         int val = req[3].Int();
-        if (val <= 0) {
+        if (val <= 0 || errno != 0) {
             goto err;
         }
 
@@ -977,7 +1002,7 @@ static int proc_config_set(NetworkServer *net, Link *link, const Request &req, R
         } else if (name == "server.timeout") {
             net->timeout = val;
         } else if (name == "server.slow_time") {
-            net->slow_time = val / 1000.0;
+            net->slow_time = val;
         } else if (name == "replication.binlog_capacity") {
             serv->ssdb->binlogs->set_capacity(val);
         }
@@ -985,7 +1010,7 @@ static int proc_config_set(NetworkServer *net, Link *link, const Request &req, R
         serv->conf->set(name.c_str(), req[3].String().c_str());
     } else if (name == "server.client_output_limit") {
         int64_t val = req[3].Int64();
-        if (val <= 0) {
+        if (val <= 0 || errno != 0) {
             goto err;
         }
 
@@ -996,15 +1021,10 @@ static int proc_config_set(NetworkServer *net, Link *link, const Request &req, R
         std::vector<std::string> ips;
         str_split(val, ips, ",");
     
-        if (ips.empty()) {
-            resp->reply_status(-1,"config set failed, server.allow|deny is empty");
-            return 0;
-        }
-
         serv->conf->del(name.c_str()); // may be multi-configs, so need del 
         if (name == "server.allow") {
             net->ip_filter->clear_allow();
-            if (val != "none") {
+            if (val != "") {
                 for(std::vector<std::string>::iterator it = ips.begin(); it != ips.end(); it ++) {
                     net->ip_filter->add_allow(*it);
                 }
@@ -1012,7 +1032,7 @@ static int proc_config_set(NetworkServer *net, Link *link, const Request &req, R
             }
         } else if (name == "server.deny") {
             net->ip_filter->clear_deny();
-            if (val != "none") {
+            if (val != "") {
                 for(std::vector<std::string>::iterator it = ips.begin(); it != ips.end(); it ++) {
                     net->ip_filter->add_deny(*it);
                 }
@@ -1026,6 +1046,19 @@ static int proc_config_set(NetworkServer *net, Link *link, const Request &req, R
             net->readonly = false;
         }
         serv->conf->set(name.c_str(), req[3].String().c_str());
+    } else if (name == "server.auth") {
+		std::string password = req[3].String();
+		if(password.empty()){
+			net->need_auth = false;		
+			net->password = "";
+			log_info("config set auth: off");
+            serv->conf->del(name.c_str());
+		}else{
+			net->need_auth = true;
+			net->password = password;
+			log_info("config set auth: on");
+            serv->conf->set(name.c_str(), req[3].String().c_str());
+		}
     } else {
         resp->reply_status(-1,"config set failed, param not support");
         return 0;
@@ -1037,7 +1070,7 @@ static int proc_config_set(NetworkServer *net, Link *link, const Request &req, R
 
 err:
     char errmsg[256];
-    snprintf(errmsg, 256, "config set failed, %s(%s) need > 0", name.c_str(),req[3].String().c_str());
+    snprintf(errmsg, 256, "config set failed, val format error '%s' '%s' ", name.c_str(),req[3].String().c_str());
     resp->reply_status(-1,errmsg);
     log_error("proc_config_set %s remote_ip: %s", errmsg, link->remote_ip);
     return 0;
@@ -1048,10 +1081,18 @@ static int proc_config_get(NetworkServer *net, Link *link, const Request &req, R
 
     SSDBServer *serv = (SSDBServer *)net->data;
     std::string name = req[2].String();
-    std::string val  = serv->conf->get_str(name.c_str());
-
     resp->push_back("ok");
-    resp->push_back(val);
+    if(name == "*" || name.empty()) {
+        std::vector<std::string> kvs;
+        serv->conf->get_all_kv(kvs);
+        for(std::vector<std::string>::iterator it = kvs.begin(); it != kvs.end(); it ++) {
+            resp->push_back(*it);
+        }
+    } else {
+        std::string val  = serv->conf->get_str(name.c_str());
+        resp->push_back(val);
+    }
+
     return 0;
 }
 
