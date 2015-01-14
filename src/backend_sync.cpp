@@ -336,6 +336,7 @@ int BackendSync::Client::sync(BinlogQueue *logs){
             if (this->last_seq > 0) {
                 return 0;
             }
+			//binlog和data拆分，所以需要加锁，避免获取到中间状态
             Locking l(&logs->mutex);
 			ret = logs->find_last(&log);
 		}else{

@@ -34,13 +34,13 @@ void Options::load(const Config &conf){
 	}
 
 	if(cache_size <= 0){
-		cache_size = 8;
+		cache_size = CONFIG_LEVELDB_CACHE_SIZE;
 	}
 	if(write_buffer_size <= 0){
-		write_buffer_size = 4;
+		write_buffer_size = CONFIG_LEVELDB_WRITE_BUFFER_SIZE;
 	}
 	if(block_size <= 0){
-		block_size = 4;
+		block_size = CONFIG_LEVELDB_BLOCK_SIZE;
 	}
 	if(max_open_files <= 0){
 		max_open_files = cache_size / 1024 * 30;
@@ -52,6 +52,6 @@ void Options::load(const Config &conf){
 		}
 	}
     if (binlog_capacity <= 0) {
-        binlog_capacity = LOG_QUEUE_SIZE;
+        binlog_capacity = CONFIG_BINLOG_CAPACITY;
     }
 }

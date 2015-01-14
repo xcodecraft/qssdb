@@ -19,10 +19,6 @@ static DEF_PROC(auth);
 #define TICK_INTERVAL          100 // ms
 #define STATUS_REPORT_TICKS    (300 * 1000/TICK_INTERVAL) // second
 
-#define DEFAULT_SLOW_TIME       10 // 10 ms
-#define DEFAULT_TIMEOUT         INT_MAX // not timeout
-#define DEFAULT_OUTPUT_LIMIT    (1024 * 1024 * 100) // 100 MB
-
 volatile bool quit = false;
 volatile uint32_t g_ticks = 0;
 
@@ -47,10 +43,10 @@ NetworkServer::NetworkServer(){
 	//conf = NULL;
 	serv_link = NULL;
 	link_count = 0;
-    max_connections = INT_MAX;
-    client_output_limit = DEFAULT_OUTPUT_LIMIT;
-    timeout = DEFAULT_TIMEOUT;
-    slow_time = DEFAULT_SLOW_TIME;
+    max_connections = CONFIG_SERVER_MAX_CONNECTIONS;
+    client_output_limit = CONFIG_SERVER_OUTPUT_LIMIT;
+    timeout = CONFIG_SERVER_TIMEOUT;
+    slow_time = CONFIG_SERVER_SLOW_TIME;
     readonly = false;
 
     bytes_read = 0;
@@ -123,6 +119,7 @@ NetworkServer* NetworkServer::init(const Config &conf){
 	inited = true;
 	
 	NetworkServer *serv = new NetworkServer();
+	serv->uptime_start = (uint64_t)millitime();
 	// init ip_filter
 	{
 		Config *cc = (Config *)conf.get("server");
@@ -191,7 +188,7 @@ NetworkServer* NetworkServer::init(const Config &conf){
 		const char *ip = conf.get_str("server.ip");
 		int port = conf.get_num("server.port");
 		if(ip == NULL || ip[0] == '\0'){
-			ip = "127.0.0.1";
+			ip = CONFIG_SERVER_IP;
 		}
 		
 		serv->serv_link = Link::listen(ip, port);
@@ -363,6 +360,19 @@ Link* NetworkServer::accept_link(){
     this->active_links.add(remote_ip_port,(int64_t)link->active_time);
 
 	return link;
+}
+
+/* if destroy link will return 1, also return 0 */
+int NetworkServer::kill_link(Link *link){
+	if (link->ref_count == 0) {
+        log_debug("destroy link, remote_ip: %s remote_port: %d", link->remote_ip, link->remote_port);
+        destroy_link(link); // delete link
+        return 1;
+	} else {
+        log_debug("make link error, remote_ip: %s remote_port: %d", link->remote_ip, link->remote_port);
+        link->mark_error(); // mark link error to forbid read/write
+        return 0;
+	}
 }
 
 void NetworkServer::destroy_link(Link *link){
@@ -569,18 +579,15 @@ void NetworkServer::destroy_idle_link(){
         Link *link = this->link_map[key];
 
         if (link == NULL) {
+            this->active_links.del(key);
             log_warn("destroy_idle_link failed, link %s not exit", key.c_str());
             return;
         }
 
         log_info("destroy_idle_link success, destroy idle link: %s", key.c_str());
 
-        if (link->ref_count == 0) {
-            log_debug("destroy_idle_link destroy_link, link: %s", key.c_str());
-            destroy_link(link); // delete link
-        } else {
-            log_debug("destroy_idle_link mark_error, link: %s", key.c_str());
-            link->mark_error(); // mark link error
+        int ret = kill_link(link); // delete link
+        if (ret == 0) {
             // just for remove from sorted_set head, add 100s
             this->active_links.add(key,active_time + 100);
         }

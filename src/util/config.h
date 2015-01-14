@@ -29,6 +29,28 @@ found in the LICENSE file.
 
 #define CONFIG_MAX_LINE		4096
 
+#define CONFIG_WORK_DIR                     "."
+
+#define CONFIG_SERVER_IP                    "127.0.0.1"
+#define CONFIG_SERVER_MAX_CONNECTIONS       INT_MAX
+#define CONFIG_SERVER_OUTPUT_LIMIT          (1024 * 1024 * 100)
+#define CONFIG_SERVER_SLOW_TIME             10 // ms
+#define CONFIG_SERVER_TIMEOUT               INT_MAX 
+#define CONFIG_SERVER_READONLY              "no"
+
+#define CONFIG_REPLICATION_BINLOG           "yes"
+
+#define CONFIG_LEVELDB_CACHE_SIZE           8
+#define CONFIG_LEVELDB_WRITE_BUFFER_SIZE    4
+#define CONFIG_LEVELDB_BLOCK_SIZE           4
+
+#ifdef NDEBUG
+	static const int CONFIG_BINLOG_CAPACITY = 10 * 1000 * 1000;
+#else
+	static const int CONFIG_BINLOG_CAPACITY = 10000;
+#endif
+
+
 /* special filenames: stdin, stdout, stderr */
 class Config{
 	private:
@@ -36,7 +58,6 @@ class Config{
 		int depth;
 
 		Config* build_key_path(const char *key);
-		void get_all_kv(const std::string &parent, const Config *config, std::vector<std::string> &vector) const;
 	public:
 		Config(const char *key=NULL, const char *val=NULL);
 		~Config();
@@ -59,15 +80,6 @@ class Config{
 		const char* str() const;
 		const char* get_str(const char *key) const;
         
-		/* for example:
-         *      vector:
-         *          server.ip
-         *          127.0.0.1
-         *          server.port
-         *          8888
-         * */
-		void get_all_kv(std::vector<std::string> &vector) const;
-
 		bool is_comment() const{
 			return key[0] == '#';
 		}

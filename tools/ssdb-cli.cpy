@@ -491,6 +491,15 @@ while(!stop){
 					print "ok";
 				}
 				break;
+			case 'repli':
+				if(args[0] == "get_offset") {
+					for(i=0; i<len(resp.data); i++){
+						print resp.data[i];
+					}
+				} else if(args[0] == "set_offset") {
+					print "ok";
+				}
+				break;
 			case 'config':
 				if(args[0] == "get") {
 					for(i=0; i<len(resp.data); i++){

@@ -115,11 +115,14 @@ int proc_multi_zget(NetworkServer *net, Link *link, const Request &req, Response
 	Request::const_iterator it=req.begin() + 1;
 	const Bytes name = *it;
 	it ++;
+	uint64_t size = 0;
 	for(; it!=req.end(); it+=1){
 		const Bytes &key = *it;
 		std::string score;
 		int ret = serv->ssdb->zget(name, key, &score);
 		if(ret == 1){
+			size += key.size() + score.size();
+			CHECK_OUTPUT_LIMIT(size);
 			resp->push_back(key.String());
 			resp->push_back(score);
 		}
@@ -192,7 +195,10 @@ int proc_zrange(NetworkServer *net, Link *link, const Request &req, Response *re
 	uint64_t limit = req[3].Uint64();
 	ZIterator *it = serv->ssdb->zrange(req[1], offset, limit);
 	resp->push_back("ok");
+	uint64_t size = 0;
 	while(it->next()){
+		size += it->key.size() + it->score.size();
+		CHECK_SCAN_OUTPUT_LIMIT(size);
 		resp->push_back(it->key);
 		resp->push_back(it->score);
 	}
@@ -208,7 +214,10 @@ int proc_zrrange(NetworkServer *net, Link *link, const Request &req, Response *r
 	uint64_t limit = req[3].Uint64();
 	ZIterator *it = serv->ssdb->zrrange(req[1], offset, limit);
 	resp->push_back("ok");
+	uint64_t size = 0;
 	while(it->next()){
+		size += it->key.size() + it->score.size();
+		CHECK_SCAN_OUTPUT_LIMIT(size);
 		resp->push_back(it->key);
 		resp->push_back(it->score);
 	}
@@ -262,7 +271,10 @@ int proc_zscan(NetworkServer *net, Link *link, const Request &req, Response *res
 		it->skip(offset);
 	}
 	resp->push_back("ok");
+	uint64_t size = 0;
 	while(it->next()){
+		size += it->key.size() + it->score.size();
+		CHECK_SCAN_OUTPUT_LIMIT(size);
 		resp->push_back(it->key);
 		resp->push_back(it->score);
 	}
@@ -285,7 +297,10 @@ int proc_zrscan(NetworkServer *net, Link *link, const Request &req, Response *re
 		it->skip(offset);
 	}
 	resp->push_back("ok");
+	uint64_t size = 0;
 	while(it->next()){
+		size += it->key.size() + it->score.size();
+		CHECK_SCAN_OUTPUT_LIMIT(size);
 		resp->push_back(it->key);
 		resp->push_back(it->score);
 	}
@@ -304,7 +319,10 @@ int proc_zkeys(NetworkServer *net, Link *link, const Request &req, Response *res
 	uint64_t limit = req[5].Uint64();
 	ZIterator *it = serv->ssdb->zscan(req[1], req[2], req[3], req[4], limit);
 	resp->push_back("ok");
+	uint64_t size = 0;
 	while(it->next()){
+		size += it->key.size();
+		CHECK_SCAN_OUTPUT_LIMIT(size);
 		resp->push_back(it->key);
 	}
 	delete it;
@@ -472,8 +490,7 @@ static int proc_join_zsets(NetworkServer *net, Link *link, const Request &req, R
     int numkeys = req[2].Int();
     int size = numkeys + offset;
     if (numkeys <= 0 || req.size() < size) {
-		resp->push_back("client_error"); 
-		resp->push_back("wrong number of arguments"); 
+		resp->reply_client_error("wrong number of arguments"); 
         return 0;
     }
     
@@ -481,17 +498,14 @@ static int proc_join_zsets(NetworkServer *net, Link *link, const Request &req, R
     int aggregate_type = AGGREGATE_SUM_TYPE;
 
     for (int i = size; i < req.size();) {
-        if (req[i] == "weight") {
-            if (req.size() < i + 1 + numkeys) {
-                resp->push_back("client_error"); 
-                resp->push_back("wrong number of arguments"); 
-                return 0;
-            }
+        if (req[i] == "weights") {
+            CHECK_NUM_PARAMS(i + 1 + numkeys);
             for (int j = 1; j <= numkeys; j ++) {
                 weights.push_back(req[i + j].Int());
             }
             i += numkeys + 1;
         } else if (req[i] == "aggregate") {
+            CHECK_NUM_PARAMS(i + 2);
             if (req[i+1] == "sum") {
                 aggregate_type = AGGREGATE_SUM_TYPE;
             } else if (req[i+1] == "min") {
@@ -499,14 +513,12 @@ static int proc_join_zsets(NetworkServer *net, Link *link, const Request &req, R
             } else if (req[i+1] == "max") {
                 aggregate_type = AGGREGATE_MAX_TYPE;
             } else {
-                resp->push_back("client_error"); 
-                resp->push_back("wrong number of arguments"); 
+                resp->reply_client_error("wrong format of arguments"); 
                 return 0;
             }
             i += 2;
         } else {
-            resp->push_back("client_error"); 
-            resp->push_back("wrong number of arguments"); 
+            resp->reply_client_error("wrong format of arguments"); 
             return 0;
         }
     }
@@ -551,8 +563,9 @@ static int proc_join_zsets(NetworkServer *net, Link *link, const Request &req, R
                 }
                 std::map<std::string,int64_t>::iterator fit = vectors[i].find(key);
                 if (fit == vectors[i].end()){
-                    // remove not found
+                    // remove
                     result.erase(key);
+                    break;
                 } else {
                     if (aggregate_type == AGGREGATE_MIN_TYPE) {
                         result[key] = score < fit->second ?  score : fit->second;

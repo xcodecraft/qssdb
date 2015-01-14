@@ -86,7 +86,7 @@ int proc_smembers(NetworkServer *net, Link *link, const Request &req, Response *
 	uint64_t size = 0;
 	while(it->next()){
 		size += it->key.size();
-		CHECK_OUTPUT_LIMIT(size);
+		CHECK_SCAN_OUTPUT_LIMIT(size);
 		resp->push_back(it->key);
 	}
 	delete it;
@@ -207,8 +207,12 @@ static int proc_join_sets(SSDBServer *serv, const Request &req, int offset, std:
                     continue;
                 }
                 if (vectors[i].find(key) == vectors[i].end()){
-                    // remove not found
+                    // remove
                     result->erase(key);
+                    if(result->empty()) {
+                        return 0;
+                    }
+                    break;
                 }
            }
         }
@@ -219,7 +223,6 @@ static int proc_join_sets(SSDBServer *serv, const Request &req, int offset, std:
             }
         }
     } else if (type == DIFF_TYPE) {
-        // FIXME 算法可以进行优化, 如果第一个key的数据够少，那么外循环实际上可以直接使用key
         *result = vectors[0]; // copy first sets
         
         for (int i = 1; i < vectors.size(); i ++) { // O(n * log(m)) 的复杂度，其中m是first key的数据大小
@@ -227,6 +230,9 @@ static int proc_join_sets(SSDBServer *serv, const Request &req, int offset, std:
                 std::string key = *it;
                 if (result->find(key) != result->end()){
                     result->erase(key);
+                    if(result->empty()) {
+                        return 0;
+                    }
                 }
             }
         }

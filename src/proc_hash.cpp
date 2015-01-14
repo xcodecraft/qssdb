@@ -207,7 +207,7 @@ int proc_hgetall(NetworkServer *net, Link *link, const Request &req, Response *r
 	uint64_t size = 0;
 	while(it->next()){
 		size += it->key.size() + it->val.size();
-		CHECK_OUTPUT_LIMIT(size);
+		CHECK_SCAN_OUTPUT_LIMIT(size);
 		resp->push_back(it->key);
 		resp->push_back(it->val);
 	}
@@ -225,7 +225,7 @@ int proc_hscan(NetworkServer *net, Link *link, const Request &req, Response *res
 	uint64_t size = 0;
 	while(it->next()){
 		size += it->key.size() + it->val.size();
-		CHECK_OUTPUT_LIMIT(size);
+		CHECK_SCAN_OUTPUT_LIMIT(size);
 		resp->push_back(it->key);
 		resp->push_back(it->val);
 	}
@@ -247,7 +247,7 @@ int proc_hrscan(NetworkServer *net, Link *link, const Request &req, Response *re
 	uint64_t size = 0;
 	while(it->next()){
 		size += it->key.size() + it->val.size();
-		CHECK_OUTPUT_LIMIT(size);
+		CHECK_SCAN_OUTPUT_LIMIT(size);
 		resp->push_back(it->key);
 		resp->push_back(it->val);
 	}
@@ -267,7 +267,7 @@ int proc_hkeys(NetworkServer *net, Link *link, const Request &req, Response *res
 	uint64_t size = 0;
 	while(it->next()){
 		size += it->key.size();
-		CHECK_OUTPUT_LIMIT(size);
+		CHECK_SCAN_OUTPUT_LIMIT(size);
 		resp->push_back(it->key);
 	}
 	delete it;
@@ -285,7 +285,7 @@ int proc_hvals(NetworkServer *net, Link *link, const Request &req, Response *res
 	uint64_t size = 0;
 	while(it->next()){
 		size += it->val.size();
-		CHECK_OUTPUT_LIMIT(size);
+		CHECK_SCAN_OUTPUT_LIMIT(size);
 		resp->push_back(it->val);
 	}
 	delete it;

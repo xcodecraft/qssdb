@@ -1,3 +1,12 @@
+* 1.8.0.6
+	* New features:
+		- Change feature: config get *
+		- Add Command: repli get_offset
+		- Add Stats: uptime_in_seconds
+		- FIX BUG: slaveof bug, and check the format of param
+		- FIX BUG: ZUNIONSTORE and ZINNERSTORE, param weight => weights
+		- FIX BUG: memory leak when the output is out of limit
+
 * 1.8.0.5
 	* New features:
 		- Optimization ssdb-bench

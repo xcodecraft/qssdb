@@ -17,6 +17,7 @@ public:
 	std::vector<std::string> resp;
 
 	int size() const;
+	void clear();
 	void push_back(const std::string &s);
 	void add(int s);
 	void add(int64_t s);
@@ -28,6 +29,7 @@ public:
 	// the same as Redis.REPLY_BULK
 	void reply_get(int status, const std::string *val=NULL, const char *errmsg=NULL);
 	void reply_list(int status, const std::vector<std::string> &list);
+	void reply_client_error(const char *errmsg=NULL);
 };
 
 #endif

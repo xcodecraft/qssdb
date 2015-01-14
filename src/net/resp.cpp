@@ -10,6 +10,10 @@ int Response::size() const{
 	return (int)resp.size();
 }
 
+void Response::clear(){
+	resp.clear();
+}
+
 void Response::push_back(const std::string &s){
 	resp.push_back(s);
 }
@@ -93,3 +97,9 @@ void Response::reply_list(int status, const std::vector<std::string> &list){
 	}
 }
 
+void Response::reply_client_error(const char *errmsg){
+	resp.push_back("client_error");
+	if(errmsg != NULL) {
+	    resp.push_back(errmsg);
+	}
+}

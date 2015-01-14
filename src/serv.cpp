@@ -380,6 +380,11 @@ SSDBServer::~SSDBServer(){
 }
 
 int SSDBServer::create_slave(std::string &ip, int port, std::string &type, std::string &id, std::string auth) {
+    if(ip == "") {
+        log_warn("slaveof: %s:%d, type: %s failed, ip is empty!", ip.c_str(), port, type.c_str());
+        return -1;
+    }
+
     if(port <= 0 || port > 65535){
         log_warn("slaveof: %s:%d, type: %s failed, port should be in (0, 65535)!", ip.c_str(), port, type.c_str());
         return -1;
@@ -406,7 +411,6 @@ int SSDBServer::create_slave(std::string &ip, int port, std::string &type, std::
         is_mirror = true;
     }else{
         type = "sync";
-        is_mirror = false;
     }
 
     log_info("slaveof: %s:%d, type: %s id: %s", ip.c_str(), port, type.c_str(), id.c_str());
@@ -474,14 +478,40 @@ bool SSDBServer::in_kv_range(const std::string &key){
 	return true;
 }
 
-int SSDBServer::set_repli_status(const std::string &id, const std::string &seq) {
+/*
+ * reset master replication offset
+ */
+int SSDBServer::set_repli_status(const std::string &id, const std::string &last_seq, const std::string &last_key) {
     std::string status_key = SLAVE_STATUS_PREFIX + id;
 
-    meta->hset(status_key, "last_key", "");
-    meta->hset(status_key, "last_seq", seq);
+    meta->hset(status_key, "last_key", last_key);
+    meta->hset(status_key, "last_seq", last_seq);
 
-    log_info("set_repli_status status_key: %s last_seq: %s" , status_key.c_str(), seq.c_str());
+    log_info("set_repli_status status_key: %s last_seq: %s last_key: %s" , status_key.c_str(), last_seq.c_str(), last_key.c_str());
 
+    return 0;
+}
+
+int SSDBServer::get_repli_status(const std::string &id, std::string &last_seq, std::string &last_key) {
+    std::string status_key = SLAVE_STATUS_PREFIX + id;
+    meta->hget(status_key, "last_seq", &last_seq);
+    meta->hget(status_key, "last_key", &last_key);
+    return 0;
+}
+
+int SSDBServer::get_all_repli_status(std::vector<std::string> &list) {
+    std::vector<std::string> names;
+    meta->hlist(SLAVE_STATUS_PREFIX, SLAVE_STATUS_RANGE_END, SSDB_MAX_SCAN_LEN, &names);
+    for(std::vector<std::string>::iterator it = names.begin(); it != names.end(); it ++) {
+        std::string last_seq, last_key;
+        meta->hget(*it, "last_seq", &last_seq);
+        meta->hget(*it, "last_key", &last_key);
+        if((*it).size() > SLAVE_STATUS_PREFIX.size()) {
+            list.push_back((*it).substr(SLAVE_STATUS_PREFIX.size()));
+            list.push_back(last_seq);
+            list.push_back(last_key);
+        }
+    }
     return 0;
 }
 
@@ -638,6 +668,9 @@ int proc_info_base(NetworkServer *net, Link *link, const Request &req, Response 
 	SSDBServer *serv = (SSDBServer *)net->data;
 	resp->push_back("# ssdb-server");
 	resp->push_back(str("version:") + SSDB_VERSION);
+	uint64_t uptime = (uint64_t)millitime() + net->uptime_start;
+	resp->push_back("uptime_in_seconds:" + str(uptime));
+	resp->push_back("uptime_in_days:" + str(uptime/86400 + 1));
     {
         // cpu stat
         struct rusage ru;
@@ -692,7 +725,7 @@ int proc_info_base(NetworkServer *net, Link *link, const Request &req, Response 
         if (serv->ssdb->kv_count != 0) {
             kv_count = kv_total_size / (serv->ssdb->kv_size / serv->ssdb->kv_count + MIN_LEVELDB_SIZE);
         }
-		resp->push_back("kv_update_size:" + str(serv->ssdb->kv_size)); // total add/update count
+		resp->push_back("kv_update_size:" + str(serv->ssdb->kv_size)); // total add/update size
 		resp->push_back("kv_update_count:" + str(serv->ssdb->kv_count)); // total add/update count
 		resp->push_back("kv_count:" + str(kv_count));
 		resp->push_back("hash_count:" + str(serv->ssdb->hash_count));
@@ -798,8 +831,7 @@ int proc_slaveof(NetworkServer *net, Link *link, const Request &req, Response *r
     CHECK_NUM_PARAMS(3);
 
     if (req.size() == 3 && (req[1] != "no" || req[2] != "one")) {
-        resp->push_back("client_error");
-        resp->push_back("param error");
+        resp->reply_client_error("param error");
         return 0;
     }
 
@@ -836,12 +868,22 @@ static int proc_slaveof_master(NetworkServer *net, Link *link, const Request &re
     SSDBServer *serv = (SSDBServer *)net->data; 
     std::string ip = req[1].String();
     int port = req[2].Int();
+    if (port <= 0 || errno != 0) {
+        resp->reply_client_error("port need > 0");
+        return 0;
+    }
+
     std::string type = req[3].String();
+    if (type != "sync" && type != "mirror") {
+        resp->reply_client_error("need sync or mirror type");
+        return 0;
+    }
+
     std::string id = req.size() >= 5 ? req[4].String() : "";
     std::string auth = req.size() >= 6 ? req[5].String() : "";
 
     if (serv->slaves.size() > 0) {
-        log_warn("slaveof %s %d %s %s, slave already exist", ip.c_str(), port, type.c_str(), id.c_str());
+        log_warn("slaveof %s %d %s %s failed, slave already exist, remote_ip: %s", ip.c_str(), port, type.c_str(), id.c_str(), link->remote_ip);
         resp->reply_status(-1, "slave already exist");
         return 0;
     }
@@ -857,9 +899,12 @@ static int proc_slaveof_master(NetworkServer *net, Link *link, const Request &re
         if (!id.empty()) {
             conf->add_child("id", id.c_str());
         }
-        conf->add_child("type", type.c_str());
         conf->add_child("ip", ip.c_str());
         conf->add_child("port", req[2].String().c_str());
+        conf->add_child("type", type.c_str());
+        if (!auth.empty()) {
+            conf->add_child("auth", auth.c_str());
+        }
 
         resp->reply_status(0, NULL);
     } else {
@@ -880,8 +925,7 @@ int proc_client(NetworkServer *net, Link *link, const Request &req, Response *re
     } else if (req[1] == "kill") {
         return proc_client_kill(net, link, req, resp);
     } else {
-        resp->push_back("client_error");
-        resp->push_back("param error");
+        resp->reply_client_error("param error");
     }
 
     return 0;
@@ -907,19 +951,14 @@ static int proc_client_kill(NetworkServer *net, Link *link, const Request &req, 
     CHECK_NUM_PARAMS(4);
 
     if (req[2] != "addr") {
-        resp->push_back("client_error");
-        resp->push_back("param error");
+        resp->reply_client_error("param error");
         return 0;
     }
 
     std::string ip = req[3].String();
     link_map_t::iterator it = net->link_map.find(ip);
     if (it != net->link_map.end() && it->second != link) {
-        if (it->second->ref_count == 0) {
-            net->destroy_link(it->second); // delete link
-        } else {
-            it->second->mark_error(); // mark link error
-        }
+        net->kill_link(it->second);
         resp->reply_status(0,NULL);
     } else {
         resp->reply_status(-1,"link not exist");
@@ -943,8 +982,7 @@ int proc_config(NetworkServer *net, Link *link, const Request &req, Response *re
     } else if (req[1] == "get") {
         return proc_config_get(net, link, req, resp);
     } else {
-        resp->push_back("client_error");
-        resp->push_back("param error");
+        resp->reply_client_error("param error");
     }
 
     return 0;
@@ -994,7 +1032,7 @@ static int proc_config_set(NetworkServer *net, Link *link, const Request &req, R
             || name == "server.slow_time" || name == "replication.binlog_capacity") {
         int val = req[3].Int();
         if (val <= 0 || errno != 0) {
-            goto err;
+            goto client_err;
         }
 
         if (name == "server.max_connections") {
@@ -1011,7 +1049,7 @@ static int proc_config_set(NetworkServer *net, Link *link, const Request &req, R
     } else if (name == "server.client_output_limit") {
         int64_t val = req[3].Int64();
         if (val <= 0 || errno != 0) {
-            goto err;
+            goto client_err;
         }
 
         net->client_output_limit = val;
@@ -1068,35 +1106,53 @@ static int proc_config_set(NetworkServer *net, Link *link, const Request &req, R
     log_info("proc_config_set name: %s val: %s remote_ip: %s", name.c_str(), req[3].String().c_str(), link->remote_ip);
     return 0;
 
-err:
+client_err:
     char errmsg[256];
     snprintf(errmsg, 256, "config set failed, val format error '%s' '%s' ", name.c_str(),req[3].String().c_str());
-    resp->reply_status(-1,errmsg);
+    resp->reply_client_error(errmsg);
     log_error("proc_config_set %s remote_ip: %s", errmsg, link->remote_ip);
     return 0;
 }
 
+#define CONFIG_GET_STR(val, default_val) ((val != NULL && val[0] != '\0')? val : default_val)
+#define CONFIG_GET_NUM(val, default_val) (val <= 0 ? default_val : val)
 static int proc_config_get(NetworkServer *net, Link *link, const Request &req, Response *resp) {
     CHECK_NUM_PARAMS(3);
 
     SSDBServer *serv = (SSDBServer *)net->data;
     std::string name = req[2].String();
     resp->push_back("ok");
-    if(name == "*" || name.empty()) {
-        std::vector<std::string> kvs;
-        serv->conf->get_all_kv(kvs);
-        for(std::vector<std::string>::iterator it = kvs.begin(); it != kvs.end(); it ++) {
-            resp->push_back(*it);
-        }
-    } else {
+    if(name != "*" && !name.empty()) {
         std::string val  = serv->conf->get_str(name.c_str());
         resp->push_back(val);
+    } else {
+        //get all config
+        resp->push_back(str("work_dir:")+CONFIG_GET_STR(serv->conf->get_str("work_dir"),CONFIG_WORK_DIR));
+        resp->push_back(str("pidfile:")+CONFIG_GET_STR(serv->conf->get_str("pidfile"),""));
+        
+        resp->push_back(str("server.ip:")+CONFIG_GET_STR(serv->conf->get_str("server.ip"),CONFIG_SERVER_IP));
+        resp->push_back(str("server.port:")+str(CONFIG_GET_NUM(serv->conf->get_num("server.port"),0)));
+        resp->push_back(str("server.allow:")+CONFIG_GET_STR(serv->conf->get_str("server.allow"),""));
+        resp->push_back(str("server.deny:")+CONFIG_GET_STR(serv->conf->get_str("server.deny"),""));
+        resp->push_back(str("server.max_connections:")+str(CONFIG_GET_NUM(serv->conf->get_num("server.max_connections"),CONFIG_SERVER_MAX_CONNECTIONS)));
+        resp->push_back(str("server.client_output_limit:")+str(CONFIG_GET_NUM(serv->conf->get_num("server.client_output_limit"),CONFIG_SERVER_OUTPUT_LIMIT)));
+        resp->push_back(str("server.timeout:")+str(CONFIG_GET_NUM(serv->conf->get_num("server.timeout"),CONFIG_SERVER_TIMEOUT)));
+        resp->push_back(str("server.readonly:")+CONFIG_GET_STR(serv->conf->get_str("server.readonly"),CONFIG_SERVER_READONLY));
+        resp->push_back(str("server.slow_time:")+str(CONFIG_GET_NUM(serv->conf->get_num("server.slow_time"),CONFIG_SERVER_SLOW_TIME)));
+
+        resp->push_back(str("replication.binlog:")+str(CONFIG_GET_STR(serv->conf->get_str("replication.binlog"),CONFIG_REPLICATION_BINLOG)));
+        resp->push_back(str("replication.binlog_capacity:")+str(CONFIG_GET_NUM(serv->conf->get_num("replication.binlog_capacity"),CONFIG_BINLOG_CAPACITY)));
+
+        resp->push_back(str("leveldb.cache_size:")+str(CONFIG_GET_NUM(serv->conf->get_num("leveldb.cache_size"),CONFIG_LEVELDB_CACHE_SIZE)));
+        resp->push_back(str("leveldb.write_buffer_size:")+str(CONFIG_GET_NUM(serv->conf->get_num("leveldb.write_buffer_size"),CONFIG_LEVELDB_WRITE_BUFFER_SIZE)));
+        resp->push_back(str("leveldb.block_size:")+str(CONFIG_GET_NUM(serv->conf->get_num("leveldb.block_size"),CONFIG_LEVELDB_BLOCK_SIZE)));
     }
 
     return 0;
 }
 
 static int proc_repli_set_offset(NetworkServer *net, Link *link, const Request &req, Response *resp);
+static int proc_repli_get_offset(NetworkServer *net, Link *link, const Request &req, Response *resp);
 
 // replication [options] [args] 
 // for example: replication set_offset id offset 
@@ -1104,21 +1160,27 @@ int proc_repli(NetworkServer *net, Link *link, const Request &req, Response *res
     CHECK_NUM_PARAMS(2);
 
     if (req[1] == "set_offset") {
-        CHECK_NUM_PARAMS(4);
         return proc_repli_set_offset(net, link, req, resp);
+    } else if (req[1] == "get_offset") {
+        return proc_repli_get_offset(net, link, req, resp);
     } else {
-        resp->push_back("client_error");
-        resp->push_back("param error");
+        resp->reply_client_error("param error");
     }
 
     return 0;
 }
 
 static int proc_repli_set_offset(NetworkServer *net, Link *link, const Request &req, Response *resp){
+	CHECK_NUM_PARAMS(4);
 	SSDBServer *serv = (SSDBServer *)net->data;
 
     std::string id = req[2].String();
     uint64_t seq = req[3].Uint64();
+    if(id == "" || errno != 0) {
+        resp->reply_client_error("param error");
+        return 0;
+    }
+    std::string last_key = req.size() >= 5 ? req[4].String() : "";
 
     std::vector<Slave *>::iterator it;
     for(it = serv->slaves.begin(); it != serv->slaves.end(); it++){
@@ -1130,9 +1192,39 @@ static int proc_repli_set_offset(NetworkServer *net, Link *link, const Request &
         }
     }
 
-    serv->set_repli_status(id, str(seq));
+    serv->set_repli_status(id, str(seq), last_key);
     resp->reply_status(0,NULL);
     log_info("proc_repli_set_offset id: %s seq: %" PRIu64 " remote_ip: %s", id.c_str(), seq, link->remote_ip);
+
+    return 0;
+}
+
+static int proc_repli_get_offset(NetworkServer *net, Link *link, const Request &req, Response *resp){
+	CHECK_NUM_PARAMS(3);
+	SSDBServer *serv = (SSDBServer *)net->data;
+
+    std::string id = req[2].String();
+    std::string last_seq, last_key;
+
+    if(id == "*" || id == "") {
+        std::vector<std::string> data;
+        serv->get_all_repli_status(data);
+        if(data.size() % 3 != 0) {
+            resp->reply_status(-1, "server error");
+            return 0;
+        }
+        resp->push_back("ok");
+        for(std::vector<std::string>::iterator it = data.begin(); it != data.end();) {
+            std::string id = *it++;
+            std::string last_seq = *it++;
+            std::string last_key = *it++;
+            resp->push_back("id=" + id + " last_seq=" + last_seq + " last_key=" + last_key);
+        }
+    } else {
+        serv->get_repli_status(id, last_seq, last_key);
+        resp->push_back("ok");
+        resp->push_back("id=" + id + " last_seq=" + last_seq + " last_key=" + last_key);
+    }
 
     return 0;
 }

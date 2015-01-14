@@ -85,8 +85,8 @@ SSDB* SSDB::open(const Options &opt, const std::string &dir){
         ssdb->binlog_options.compaction_speed = ssdb->options.compaction_speed;   
         ssdb->binlog_options.max_open_files = ssdb->options.max_open_files > 50 ? 50 : ssdb->options.max_open_files; // max open 50 files for binlog
         ssdb->binlog_options.block_cache = leveldb::NewLRUCache(10 * 1048576); // 10MB LRU cache
-        ssdb->binlog_options.block_size = ssdb->options.block_size * 1024;
-        ssdb->binlog_options.write_buffer_size = opt.write_buffer_size * 1024 * 1024;
+        ssdb->binlog_options.block_size = ssdb->options.block_size;
+        ssdb->binlog_options.write_buffer_size = ssdb->options.write_buffer_size;
         status = leveldb::DB::Open(ssdb->binlog_options, binlog_dir, &ssdb->binlog_db);
         if(!status.ok()){
             log_error("open db %s failed", binlog_dir.c_str());

@@ -61,7 +61,8 @@ int proc_setnx(NetworkServer *net, Link *link, const Request &req, Response *res
 int proc_msetnx(NetworkServer *net, Link *link, const Request &req, Response *resp){
 	SSDBServer *serv = (SSDBServer *)net->data;
 	if(req.size() < 3 || req.size() % 2 != 1){
-		resp->push_back("client_error");
+		resp->reply_client_error("wrong number of arguments");
+		return 0;
 	}else{
 		int ret = serv->ssdb->msetnx(req, 1);
         serv->save_kv_stats();
@@ -176,6 +177,7 @@ int proc_multi_del(NetworkServer *net, Link *link, const Request &req, Response 
 
 	Locking l(&serv->expiration->mutex);
 	int ret = serv->ssdb->multi_del(req, 1);
+	serv->save_kv_stats();
 	if(ret == -1){
 		resp->push_back("error");
 	}else{
@@ -214,6 +216,7 @@ int proc_del(NetworkServer *net, Link *link, const Request &req, Response *resp)
 
 	Locking l(&serv->expiration->mutex);
 	int ret = serv->ssdb->del(req[1]);
+	serv->save_kv_stats();
 	if(ret == -1){
 		resp->push_back("error");
 	}else{
@@ -236,7 +239,7 @@ int proc_scan(NetworkServer *net, Link *link, const Request &req, Response *resp
 	uint64_t size = 0;
 	while(it->next()){
 		size += it->key.size() + it->val.size();
-		CHECK_OUTPUT_LIMIT(size);
+		CHECK_SCAN_OUTPUT_LIMIT(size);
 		resp->push_back(it->key);
 		resp->push_back(it->val);
 	}
@@ -255,7 +258,7 @@ int proc_rscan(NetworkServer *net, Link *link, const Request &req, Response *res
 	uint64_t size = 0;
 	while(it->next()){
 		size += it->key.size() + it->val.size();
-		CHECK_OUTPUT_LIMIT(size);
+		CHECK_SCAN_OUTPUT_LIMIT(size);
 		resp->push_back(it->key);
 		resp->push_back(it->val);
 	}
@@ -280,7 +283,7 @@ int proc_keys(NetworkServer *net, Link *link, const Request &req, Response *resp
 	uint64_t size = 0;
 	while(it->next()){
 		size += it->key.size();
-		CHECK_OUTPUT_LIMIT(size);
+		CHECK_SCAN_OUTPUT_LIMIT(size);
 		resp->push_back(it->key);
 	}
 	delete it;
@@ -460,9 +463,8 @@ int proc_setrange(NetworkServer *net, Link *link, const Request &req, Response *
 
 	const Bytes &key = req[1];
 	int offset = req[2].Int();
-	if(offset < 0){
-		resp->push_back("client_error");
-		resp->push_back("offset is not an integer or out of range");
+	if(offset < 0 || errno != 0){
+		resp->reply_client_error("offset is not an numeric or out of range");
 		return 0;
 	}
 	int ret = serv->ssdb->setrange(key, offset, req[3]);

@@ -48,7 +48,9 @@ public:
 	bool in_kv_range(const std::string &key);
 	bool in_kv_range(const Bytes &key);
 
-	int set_repli_status(const std::string &id, const std::string &seq);
+	int set_repli_status(const std::string &id, const std::string &last_seq, const std::string &last_key);
+	int get_repli_status(const std::string &id, std::string &last_seq, std::string &last_key);
+	int get_all_repli_status(std::vector<std::string> &list);
 
     int save_kv_stats(bool force=false);
 
@@ -76,8 +78,17 @@ public:
 
 #define CHECK_OUTPUT_LIMIT(size) do{ \
 		if(size > net->client_output_limit){ \
-            resp->resp.clear(); \
+            resp->clear(); \
             resp->reply_status(-1, "client output limit"); \
+            return 0; \
+		} \
+	}while(0)
+
+#define CHECK_SCAN_OUTPUT_LIMIT(size) do{ \
+		if(size > net->client_output_limit){ \
+            resp->clear(); \
+            resp->reply_status(-1, "client output limit"); \
+            delete it; \
             return 0; \
 		} \
 	}while(0)

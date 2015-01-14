@@ -67,6 +67,7 @@ public:
 	uint64_t client_output_limit; // byte 
 	uint64_t bytes_written; // byte 
 	uint64_t bytes_read; // byte 
+	uint64_t uptime_start; // second
 
 	~NetworkServer();
 	
@@ -74,6 +75,7 @@ public:
 	static NetworkServer* init(const char *conf_file);
 	static NetworkServer* init(const Config &conf);
 	void serve();
+	int kill_link(Link *link);
 	void destroy_link(Link *link);
 	void destroy_idle_link();
 };

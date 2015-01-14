@@ -42,10 +42,6 @@ Config* Config::load(const char *filename){
 		int indent = strspn(buf, "\t");
 		char *key = buf + indent;
 
-		if(*key == '#'){
-			cfg->add_child("#", key + 1, lineno);
-			continue;
-		}
 		if(indent <= last_indent){
 			for(int i = indent; i <= last_indent; i++){
 				/* 第一个配置时, 此条件为真 */
@@ -61,6 +57,16 @@ Config* Config::load(const char *filename){
 		if(isspace(*key)){
 			log_error("invalid line(%d): unexpected whitespace char '%c'", lineno, *key);
 			goto err;
+		}
+
+		if(*key == '#'){
+			cfg->add_child("#", key + 1, lineno);
+			if(indent == 0) {
+			    last_indent = 0;
+            } else {
+			    last_indent = indent - 1;
+			}
+			continue;
 		}
 
 		char *val = key;
@@ -301,27 +307,4 @@ int Config::save(const char *filename) const{
 		fclose(fp);
 	}
 	return 0;
-}
-
-void Config::get_all_kv(const std::string &key, const Config *config, std::vector<std::string> &vector) const {
-    if (config->is_comment()) {
-        return;
-    }
-
-    if (config->children.empty()) {
-        // key: server.ip etc.
-        vector.push_back(key);
-        vector.push_back(config->val);
-        return;
-    }
-
-	for(int i = 0; i < (int)config->children.size(); i++){
-        get_all_kv(key + "." + config->children[i]->key, config->children[i], vector);
-    }
-}
-
-void Config::get_all_kv(std::vector<std::string> &vector) const {
-	for(int i = 0; i < (int)children.size(); i++){
-        get_all_kv(children[i]->key, children[i], vector);
-	}
 }

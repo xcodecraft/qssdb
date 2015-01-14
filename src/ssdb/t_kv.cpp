@@ -133,7 +133,7 @@ int SSDBImpl::msetnx(const std::vector<Bytes> &kvs, int offset, char log_type){
 	}
 	leveldb::Status s = binlogs->commit();
 	if(!s.ok()){
-		log_error("multi_set error: %s", s.ToString().c_str());
+		log_error("msetnx error: %s", s.ToString().c_str());
 		return -1;
 	}
     kv_size += size;

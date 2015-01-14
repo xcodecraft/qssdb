@@ -216,7 +216,7 @@ void init(){
 
 	app_args.work_dir = conf->get_str("work_dir");
 	if(app_args.work_dir.empty()){
-		app_args.work_dir = ".";
+		app_args.work_dir = CONFIG_WORK_DIR;
 	}
 	if(!is_dir(app_args.work_dir.c_str())){
 		fprintf(stderr, "'%s' is not a directory or not exists!\n", app_args.work_dir.c_str());
