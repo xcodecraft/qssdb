@@ -235,7 +235,7 @@ int main(int argc, char **argv){
             clients = atoi(argv[++i]);
         } else if(strcmp("-n", argv[i]) == 0) {
             requests = atoi(argv[++i]);
-        } else if(strcmp("-n", argv[i]) == 0) {
+        } else if(strcmp("-s", argv[i]) == 0) {
             size = atoi(argv[++i]);
         } else if(strcmp("-t", argv[i]) == 0) {
             str_split(argv[++i], test_cases, ","); 
