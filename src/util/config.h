@@ -37,6 +37,7 @@ found in the LICENSE file.
 #define CONFIG_SERVER_SLOW_TIME             10 // ms
 #define CONFIG_SERVER_TIMEOUT               INT_MAX 
 #define CONFIG_SERVER_READONLY              "no"
+#define CONFIG_SERVER_FSYNC_PERIOD          1 // second
 
 #define CONFIG_REPLICATION_BINLOG           "yes"
 

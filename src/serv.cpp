@@ -304,11 +304,17 @@ SSDBServer::SSDBServer(SSDB *ssdb, SSDB *meta, Config *conf, const std::string &
 	net->data = this;
 	this->reg_procs(net);
 
+	this->fsync_period = conf->get_num("server.fsync_period");
+	if (this->fsync_period <= 0) {
+	    this->fsync_period = CONFIG_SERVER_FSYNC_PERIOD;
+	}
+
 	int sync_speed = conf->get_num("replication.sync_speed");
 
 	backend_dump = new BackendDump(this->ssdb);
 	backend_sync = new BackendSync(this->ssdb, sync_speed);
 	expiration = new ExpirationHandler(this->ssdb);
+	this->start_fsync_thread();
 
     {
         int port = conf->get_num("server.port"); 
@@ -375,6 +381,8 @@ SSDBServer::~SSDBServer(){
 	delete backend_dump;
 	delete backend_sync;
 	delete expiration;
+
+	this->stop_fsync_thread();
 
 	log_debug("SSDBServer finalized");
 }
@@ -668,9 +676,9 @@ int proc_info_base(NetworkServer *net, Link *link, const Request &req, Response 
 	SSDBServer *serv = (SSDBServer *)net->data;
 	resp->push_back("# ssdb-server");
 	resp->push_back(str("version:") + SSDB_VERSION);
-	uint64_t uptime = (uint64_t)millitime() + net->uptime_start;
+	uint64_t uptime = (uint64_t)millitime() - net->uptime_start;
 	resp->push_back("uptime_in_seconds:" + str(uptime));
-	resp->push_back("uptime_in_days:" + str(uptime/86400 + 1));
+	resp->push_back("uptime_in_days:" + str(uptime/86400));
     {
         // cpu stat
         struct rusage ru;
@@ -1029,7 +1037,8 @@ static int proc_config_set(NetworkServer *net, Link *link, const Request &req, R
     std::string name = req[2].String();
 
     if (name == "server.max_connections" || name == "server.timeout" 
-            || name == "server.slow_time" || name == "replication.binlog_capacity") {
+            || name == "server.slow_time" || name == "server.fsync_period" 
+            || name == "replication.binlog_capacity") {
         int val = req[3].Int();
         if (val <= 0 || errno != 0) {
             goto client_err;
@@ -1041,6 +1050,8 @@ static int proc_config_set(NetworkServer *net, Link *link, const Request &req, R
             net->timeout = val;
         } else if (name == "server.slow_time") {
             net->slow_time = val;
+        } else if (name == "server.fsync_period") {
+            serv->fsync_period = val;
         } else if (name == "replication.binlog_capacity") {
             serv->ssdb->binlogs->set_capacity(val);
         }
@@ -1124,7 +1135,39 @@ static int proc_config_get(NetworkServer *net, Link *link, const Request &req, R
     resp->push_back("ok");
     if(name != "*" && !name.empty()) {
         std::string val  = serv->conf->get_str(name.c_str());
-        resp->push_back(val);
+        if(!val.empty()) {
+            resp->push_back(val);
+        } else {
+            if(name == "work_dir") {
+                resp->push_back(CONFIG_WORK_DIR);
+            } else if(name == "server.ip") {
+                resp->push_back(CONFIG_SERVER_IP);
+            } else if (name == "server.max_connections") {
+                resp->push_back(str(CONFIG_SERVER_MAX_CONNECTIONS));
+            } else if (name == "server.client_output_limit") {
+                resp->push_back(str(CONFIG_SERVER_OUTPUT_LIMIT));
+            } else if (name == "server.timeout") {
+                resp->push_back(str(CONFIG_SERVER_TIMEOUT));
+            } else if (name == "server.readonly") {
+                resp->push_back(CONFIG_SERVER_READONLY);
+            } else if (name == "server.slow_time") {
+                resp->push_back(str(CONFIG_SERVER_SLOW_TIME));
+            } else if (name == "server.fsync_period") {
+                resp->push_back(str(CONFIG_SERVER_FSYNC_PERIOD));
+            } else if (name == "replication.binlog") {
+                resp->push_back(CONFIG_REPLICATION_BINLOG);
+            } else if (name == "replication.binlog_capacity") {
+                resp->push_back(str(CONFIG_BINLOG_CAPACITY));
+            } else if (name == "leveldb.cache_size") {
+                resp->push_back(str(CONFIG_LEVELDB_CACHE_SIZE));
+            } else if (name == "leveldb.write_buffer_size") {
+                resp->push_back(str(CONFIG_LEVELDB_WRITE_BUFFER_SIZE));
+            } else if (name == "leveldb.block_size") {
+                resp->push_back(str(CONFIG_LEVELDB_BLOCK_SIZE));
+            } else {
+                resp->push_back("");
+            }
+        }
     } else {
         //get all config
         resp->push_back(str("work_dir:")+CONFIG_GET_STR(serv->conf->get_str("work_dir"),CONFIG_WORK_DIR));
@@ -1139,6 +1182,7 @@ static int proc_config_get(NetworkServer *net, Link *link, const Request &req, R
         resp->push_back(str("server.timeout:")+str(CONFIG_GET_NUM(serv->conf->get_num("server.timeout"),CONFIG_SERVER_TIMEOUT)));
         resp->push_back(str("server.readonly:")+CONFIG_GET_STR(serv->conf->get_str("server.readonly"),CONFIG_SERVER_READONLY));
         resp->push_back(str("server.slow_time:")+str(CONFIG_GET_NUM(serv->conf->get_num("server.slow_time"),CONFIG_SERVER_SLOW_TIME)));
+        resp->push_back(str("server.fsync_period:")+str(CONFIG_GET_NUM(serv->conf->get_num("server.fsync_period"),CONFIG_SERVER_FSYNC_PERIOD)));
 
         resp->push_back(str("replication.binlog:")+str(CONFIG_GET_STR(serv->conf->get_str("replication.binlog"),CONFIG_REPLICATION_BINLOG)));
         resp->push_back(str("replication.binlog_capacity:")+str(CONFIG_GET_NUM(serv->conf->get_num("replication.binlog_capacity"),CONFIG_BINLOG_CAPACITY)));
@@ -1416,3 +1460,45 @@ static size_t memory_used() {
     return strtoll(data,NULL,10) * sysconf(_SC_PAGESIZE); // rss_size * page_size
 }
 
+void SSDBServer::start_fsync_thread(){
+	fsync_thread_quit = false;
+	int err = pthread_create(&fsync_tid, NULL, &this->backend_fsync, this);
+	if(err != 0){
+		log_fatal("can't create fsync thread: %s", strerror(err));
+		exit(0);
+	}
+	log_info("start backend_fsync thread, tid: %ld", fsync_tid);
+}
+
+void SSDBServer::stop_fsync_thread(){
+	fsync_thread_quit = true;
+	void *tret;
+	int err = pthread_join(fsync_tid, &tret);
+    if(err != 0){
+		log_error("can't join fsync thread: %s", strerror(err));
+	}
+}
+
+void* SSDBServer::backend_fsync(void *arg){
+	SSDBServer *serv = (SSDBServer *)arg;
+	double fsync_time = millitime();
+	uint64_t fsync_count = 0;
+    
+	while(!serv->fsync_thread_quit){
+        usleep(100 * 1000);
+
+        double current = millitime();
+        if(current - fsync_time < serv->fsync_period) {
+            continue;
+        }
+
+        // fsync
+        serv->ssdb->fsync();
+        fsync_time = current;
+
+        log_debug("backend_fsync thread fsync %lld times", ++fsync_count);
+	}
+	log_info("backend_fsync thread quit!");
+	
+	return (void *)NULL;
+}

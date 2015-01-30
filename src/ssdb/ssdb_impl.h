@@ -163,6 +163,7 @@ public:
 	virtual int qset(const Bytes &name, int64_t index, const Bytes &item, char log_type=BinlogType::SYNC);
 	virtual int qset_by_seq(const Bytes &name, uint64_t seq, const Bytes &item, char log_type=BinlogType::SYNC);
 
+	virtual int fsync();
     virtual BinlogQueue *get_binlogs();
 
 private:

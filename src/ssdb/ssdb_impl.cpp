@@ -210,11 +210,25 @@ std::vector<std::string> SSDBImpl::info(){
 		}
 	}
 
+	if(binlog_db) {
+        info.push_back("# binlog");
+        for(size_t i=0; i<keys.size(); i++){
+            std::string key = keys[i];
+            std::string val;
+            if(binlog_db->GetProperty(key, &val)){
+                info.push_back(key);
+                info.push_back(val);
+            }
+        }
+	}
 	return info;
 }
 
 void SSDBImpl::compact(){
 	db->CompactRange(NULL, NULL);
+	if (binlog_db) {
+	    binlog_db->CompactRange(NULL, NULL);
+	}
 }
 
 int SSDBImpl::key_range(std::vector<std::string> *keys){
@@ -348,6 +362,27 @@ int SSDBImpl::key_range(std::vector<std::string> *keys){
 	keys->push_back(qend);
 	
 	return ret;
+}
+
+int SSDBImpl::fsync(){
+	leveldb::WriteOptions write_opts;
+	write_opts.sync = true;
+
+	// fsync db and binlog
+	leveldb::Status s = db->Delete(write_opts, FSYNC_KEY);
+	if(!s.ok()){
+		log_error("fsync data error: %s", s.ToString().c_str());
+		return -1;
+	}
+	if (binlog_db) {
+        s = binlog_db->Delete(write_opts, FSYNC_KEY);
+        if(!s.ok()){
+            log_error("fsync binlog error: %s", s.ToString().c_str());
+            return -1;
+        }
+	}
+    
+	return 1;
 }
 
 BinlogQueue *SSDBImpl::get_binlogs() {

@@ -24,6 +24,8 @@ static const int MIN_LEVELDB_SIZE       = 174;
 static const std::string SLAVE_STATUS_PREFIX = "slave.status.";
 static const std::string SLAVE_STATUS_RANGE_END = "slave.statut.";
 
+static const std::string FSYNC_KEY = "SSDB.KEY.FOR.FSYNC.DATA.AND.BINLOG";
+
 class DataType{
 public:
 	static const char SYNCLOG	= 1;

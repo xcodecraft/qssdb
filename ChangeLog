@@ -1,3 +1,10 @@
+* 1.8.0.7
+	* New features:
+		- Support fsync_period
+		- Fix uptime bug
+		- Fix "config get param" bug, output default value when the config not exit
+		- Support binlog leveldb.stats, Support binlog compact
+
 * 1.8.0.6
 	* New features:
 		- Change feature: config get *

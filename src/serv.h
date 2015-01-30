@@ -24,11 +24,19 @@ class SSDBServer
 private:
 	void reg_procs(NetworkServer *net);
     int load_kv_stats();
+
+	void start_fsync_thread();
+	void stop_fsync_thread();
+	static void* backend_fsync(void *arg);
 	
 	std::string kv_range_s;
 	std::string kv_range_e;
 
 	SSDB *meta;
+
+	// for fsync
+	bool fsync_thread_quit;
+	pthread_t fsync_tid;
 
 public:
 	SSDBImpl *ssdb;
@@ -39,6 +47,9 @@ public:
     std::map<std::string,std::string> addrs;
     Config *conf;
     std::string conf_path;
+
+	// for fsync
+	int fsync_period;
 
 	SSDBServer(SSDB *ssdb, SSDB *meta, Config *conf, const std::string &conf_path, NetworkServer *net);
 	~SSDBServer();
