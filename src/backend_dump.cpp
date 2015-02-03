@@ -6,6 +6,8 @@ found in the LICENSE file.
 #include <pthread.h>
 #include "backend_dump.h"
 #include "util/log.h"
+#include "ssdb/binlog.h"
+#include "ssdb/ssdb_impl.h"
 
 BackendDump::BackendDump(SSDB *ssdb){
 	this->ssdb = ssdb;
@@ -38,6 +40,9 @@ void* BackendDump::_run_thread(void *arg){
 	//
 	link->noblock(false);
 
+	SSDBImpl *ssdb = (SSDBImpl *)backend->ssdb;
+	BinlogQueue *logs = ssdb->binlogs;
+
 	const std::vector<Bytes>* req = link->last_recv();
 
 	std::string start = "";
@@ -64,11 +69,28 @@ void* BackendDump::_run_thread(void *arg){
 
 	Buffer *output = link->output;
 
+	link->send("begin");
+
+	//send last_seq of binlog at the time begin to dump
+	uint64_t last_seq;
+	Binlog log;
+	{
+		Locking l(&logs->mutex);
+		int ret = logs->find_last(&log);
+		if(ret <= 0){
+			last_seq = 0;
+		}else{
+			last_seq = log.seq();
+		}
+	}
+	char buf[32];
+	snprintf(buf, sizeof(buf), "%ld", last_seq);
+	link->send("set_offset", buf);
+
 	int count = 0;
 	bool quit = false;
 	Iterator *it = backend->ssdb->iterator(start, end, limit);
-	
-	link->send("begin");
+
 	while(!quit){
 		if(!it->next()){
 			quit = true;

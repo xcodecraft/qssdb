@@ -304,6 +304,13 @@ void BinlogQueue::set_enabled(bool enabled){
 
 void BinlogQueue::set_last_seq(uint64_t seq){
    this->last_seq = seq;
+   if(this->last_seq < this->min_seq){
+        this->min_seq = this->last_seq;
+   }
+}
+
+uint64_t BinlogQueue::get_last_seq(){
+   return this->last_seq;
 }
 
 bool BinlogQueue::is_enabled(){

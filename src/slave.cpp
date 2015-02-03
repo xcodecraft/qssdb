@@ -202,7 +202,8 @@ int Slave::connect(){
 				link = NULL;
 				goto err;
 			}
-			log_info("[%s] ready to receive binlogs", this->id_.c_str());
+			log_info("[%s] ready to receive binlogs, last_seq: %" PRIu64 ", last_key: %s", 
+			    this->id_.c_str(), this->last_seq, this->last_key.c_str());
 			return 1;
 		}
 	}
@@ -368,7 +369,7 @@ int Slave::proc_copy(const Binlog &log, const std::vector<Bytes> &req){
                 // if master, don't set no_log
                 return proc_sync(log, req);
             } else {
-                // FIXME unable to support multi replications
+                // unable to support multi replications
                 bool enabled = ssdb->get_binlogs()->is_enabled();
                 ssdb->get_binlogs()->set_enabled(false); // disabled binlog
                 int result = proc_sync(log, req);

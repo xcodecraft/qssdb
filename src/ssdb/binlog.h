@@ -94,6 +94,7 @@ public:
     void set_enabled(bool enabled);
     bool is_enabled();
     void set_last_seq(uint64_t seq);
+    uint64_t get_last_seq();
 
     int get_capacity();
     void set_capacity(int capacity);

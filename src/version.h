@@ -1,6 +1,6 @@
 #ifndef SSDB_DEPS_H
 #ifndef SSDB_VERSION
-#define SSDB_VERSION "1.8.0.7"
+#define SSDB_VERSION "1.8.0.8"
 #endif
 #endif
 #include <stdlib.h>

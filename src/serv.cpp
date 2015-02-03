@@ -339,11 +339,17 @@ SSDBServer::SSDBServer(SSDB *ssdb, SSDB *meta, Config *conf, const std::string &
 	{ // slaves
 		const Config *repl_conf = conf->get("replication");
 		if(repl_conf != NULL){
+			int slave_count = 0;
 			std::vector<Config *> children = repl_conf->children;
 			for(std::vector<Config *>::iterator it = children.begin(); it != children.end(); it++){
 				Config *c = *it;
 				if(c->key != "slaveof"){
 					continue;
+				}
+				if(++ slave_count > 1) {
+					log_fatal("don't support multi slaves!");
+					fprintf(stderr, "don't support multi slaves!\n");
+					exit(1);
 				}
 				std::string ip = c->get_str("ip");
 				int port = c->get_num("port");
@@ -1195,18 +1201,41 @@ static int proc_config_get(NetworkServer *net, Link *link, const Request &req, R
     return 0;
 }
 
-static int proc_repli_set_offset(NetworkServer *net, Link *link, const Request &req, Response *resp);
-static int proc_repli_get_offset(NetworkServer *net, Link *link, const Request &req, Response *resp);
+static int proc_repli_set_sync_pos(NetworkServer *net, Link *link, int param_pos, const Request &req, Response *resp);
+static int proc_repli_get_sync_pos(NetworkServer *net, Link *link, int param_pos, const Request &req, Response *resp);
+static int proc_repli_set_binlog_lastseq(NetworkServer *net, Link *link, int param_pos, const Request &req, Response *resp);
+static int proc_repli_get_binlog_lastseq(NetworkServer *net, Link *link, const Request &req, Response *resp);
 
 // replication [options] [args] 
-// for example: replication set_offset id offset 
+// for example: 
+//      repli set sync_pos id seq [last_key]: update master-slave sync status
+//      repli set binlog_lastseq seq: update binlog last_seq
+//      repli set sync_pos_and_binlog_lastseq id seq [last_key]: update master-slave sync status and current binlog last_seq
+//      repli get sync_pos id|*
+//      repli get binlog_lastseq
 int proc_repli(NetworkServer *net, Link *link, const Request &req, Response *resp){
-    CHECK_NUM_PARAMS(2);
+    const int CMD_LEN = 3;
+    CHECK_NUM_PARAMS(CMD_LEN);
 
-    if (req[1] == "set_offset") {
-        return proc_repli_set_offset(net, link, req, resp);
-    } else if (req[1] == "get_offset") {
-        return proc_repli_get_offset(net, link, req, resp);
+    if (req[1] == "set") {
+        if(req[2] == "sync_pos") {
+            return proc_repli_set_sync_pos(net, link, CMD_LEN, req, resp);
+        } else if(req[2] == "binlog_lastseq") {
+            return proc_repli_set_binlog_lastseq(net, link, CMD_LEN, req, resp);
+        } else if (req[2] == "sync_pos_and_binlog_lastseq") {
+            proc_repli_set_sync_pos(net, link, CMD_LEN, req, resp);
+            return proc_repli_set_binlog_lastseq(net, link, CMD_LEN + 1, req, resp);
+        } else {
+            resp->reply_client_error("param error");
+        }
+    } else if (req[1] == "get") {
+        if(req[2] == "sync_pos") {
+            return proc_repli_get_sync_pos(net, link, CMD_LEN, req, resp);
+        } else if(req[2] == "binlog_lastseq") {
+            return proc_repli_get_binlog_lastseq(net, link, req, resp);
+        } else {
+            resp->reply_client_error("param error");
+        }
     } else {
         resp->reply_client_error("param error");
     }
@@ -1214,17 +1243,17 @@ int proc_repli(NetworkServer *net, Link *link, const Request &req, Response *res
     return 0;
 }
 
-static int proc_repli_set_offset(NetworkServer *net, Link *link, const Request &req, Response *resp){
-	CHECK_NUM_PARAMS(4);
+static int proc_repli_set_sync_pos(NetworkServer *net, Link *link, int param_pos, const Request &req, Response *resp){
+	CHECK_NUM_PARAMS(param_pos + 2);
 	SSDBServer *serv = (SSDBServer *)net->data;
 
-    std::string id = req[2].String();
-    uint64_t seq = req[3].Uint64();
+    std::string id = req[param_pos].String();
+    uint64_t seq = req[param_pos + 1].Uint64();
     if(id == "" || errno != 0) {
         resp->reply_client_error("param error");
         return 0;
     }
-    std::string last_key = req.size() >= 5 ? req[4].String() : "";
+    std::string last_key = req.size() >= param_pos + 3 ? req[param_pos + 2].String() : "";
 
     std::vector<Slave *>::iterator it;
     for(it = serv->slaves.begin(); it != serv->slaves.end(); it++){
@@ -1243,11 +1272,11 @@ static int proc_repli_set_offset(NetworkServer *net, Link *link, const Request &
     return 0;
 }
 
-static int proc_repli_get_offset(NetworkServer *net, Link *link, const Request &req, Response *resp){
-	CHECK_NUM_PARAMS(3);
+static int proc_repli_get_sync_pos(NetworkServer *net, Link *link, int param_pos, const Request &req, Response *resp){
+	CHECK_NUM_PARAMS(param_pos + 1);
 	SSDBServer *serv = (SSDBServer *)net->data;
 
-    std::string id = req[2].String();
+    std::string id = req[param_pos].String();
     std::string last_seq, last_key;
 
     if(id == "*" || id == "") {
@@ -1269,6 +1298,40 @@ static int proc_repli_get_offset(NetworkServer *net, Link *link, const Request &
         resp->push_back("ok");
         resp->push_back("id=" + id + " last_seq=" + last_seq + " last_key=" + last_key);
     }
+
+    return 0;
+}
+
+static int proc_repli_set_binlog_lastseq(NetworkServer *net, Link *link, int param_pos, const Request &req, Response *resp){
+	CHECK_NUM_PARAMS(param_pos + 1);
+	SSDBServer *serv = (SSDBServer *)net->data;
+
+    uint64_t seq = req[param_pos].Uint64();
+    if(errno != 0) {
+        resp->reply_client_error("param error");
+        return 0;
+    }
+
+    {
+        Locking l(&serv->ssdb->get_binlogs()->mutex);
+        serv->ssdb->get_binlogs()->update(seq, BinlogType::NOOP, BinlogCommand::NONE, "", "");
+        serv->ssdb->get_binlogs()->set_last_seq(seq);
+    }
+    resp->reply_status(0,NULL);
+    log_info("proc_repli_set_max_binlog seq: %" PRIu64 " remote_ip: %s", seq, link->remote_ip);
+
+    return 0;
+}
+
+static int proc_repli_get_binlog_lastseq(NetworkServer *net, Link *link, const Request &req, Response *resp){
+	SSDBServer *serv = (SSDBServer *)net->data;
+
+    uint64_t seq;
+    {
+        Locking l(&serv->ssdb->get_binlogs()->mutex);
+        seq = serv->ssdb->get_binlogs()->get_last_seq();
+    }
+    resp->reply_int(0, seq);
 
     return 0;
 }

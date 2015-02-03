@@ -492,11 +492,11 @@ while(!stop){
 				}
 				break;
 			case 'repli':
-				if(args[0] == "get_offset") {
+				if(args[0] == "get") {
 					for(i=0; i<len(resp.data); i++){
 						print resp.data[i];
 					}
-				} else if(args[0] == "set_offset") {
+				} else if(args[0] == "set") {
 					print "ok";
 				}
 				break;
