@@ -1,6 +1,6 @@
 include ../build_config.mk
 
-OBJS += ../src/net/link.o ../src/net/fde.o ../src/util/log.o ../src/util/bytes.o ../src/util/config.o ../src/ssdb/options.o ../src/ssdb/binlog.o ../src/ssdb/t_hash.o ../src/ssdb/iterator.o
+OBJS += ../src/net/link.o ../src/net/fde.o ../src/util/log.o ../src/util/bytes.o ../src/util/config.o ../src/ssdb/options.o ../src/ssdb/binlog.o ../src/ssdb/t_hash.o ../src/ssdb/t_kv.o ../src/ssdb/t_zset.o ../src/ssdb/t_queue.o ../src/ssdb/iterator.o ../src/ssdb/ssdb_impl.o 
 CFLAGS += -I../src
 EXES = ssdb-bench ssdb-dump ssdb-repair leveldb-import
 

@@ -1,6 +1,10 @@
+* 1.8.0.9
+	* New features:
+		- Fix ssdb-dump hset bug
+
 * 1.8.0.8
 	* New features:
-		- Fix ssdb-dump bug
+		- Fix ssdb-dump bug: support config, and add last_seq status
 		- Change command repli
 
 * 1.8.0.7

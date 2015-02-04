@@ -161,7 +161,7 @@ leveldb::Status binlog_open(Options &opt, std::string &data_dir, leveldb::DB **d
 	return leveldb::DB::Open(options, data_dir, db);
 }
 
-int save_sync_status(DumpConf *dump_conf, leveldb::DB *meta_db, uint64_t last_seq)
+int save_sync_status(DumpConf *dump_conf, SSDB *meta_db, uint64_t last_seq)
 {
 	std::string status_key;
 
@@ -173,20 +173,13 @@ int save_sync_status(DumpConf *dump_conf, leveldb::DB *meta_db, uint64_t last_se
         status_key = SLAVE_STATUS_PREFIX + dump_conf->id;
 	}
 
-	std::string hkey_last_seq = encode_hash_key(status_key, "last_seq");
-    leveldb::Status status = meta_db->Put(leveldb::WriteOptions(), hkey_last_seq, str(last_seq));
-    if(!status.ok()) {
-        return -1;
-    }
-	std::string hkey_last_key = encode_hash_key(status_key, "last_key");
-    status = meta_db->Put(leveldb::WriteOptions(), hkey_last_key, "");
-    if(!status.ok()) {
-        return -1;
-    }
+    meta_db->hset(status_key, "last_key", "");
+    meta_db->hset(status_key, "last_seq", str(last_seq));
+
     return 0;
 }
 
-void dump_end(DumpConf *dump_conf, leveldb::DB *meta_db, BinlogQueue *binlogs, uint64_t last_seq)
+void dump_end(DumpConf *dump_conf, SSDB *meta_db, BinlogQueue *binlogs, uint64_t last_seq)
 {
     if(last_seq == 0) {
         return;
@@ -268,10 +261,10 @@ int main(int argc, char **argv){
 	link->send("dump", "A", "", "-1");
 	link->flush();
 
-	leveldb::DB* data_db;
-	leveldb::DB* meta_db;
-	leveldb::DB* binlog_db;
-	BinlogQueue* binlogs;
+	leveldb::DB *data_db = NULL;
+	leveldb::DB *binlog_db = NULL;
+	BinlogQueue *binlogs = NULL;
+	SSDB *meta_db = NULL;
 	leveldb::Status status;
 
 	status = db_open(opt, data_dir, &data_db);
@@ -288,8 +281,9 @@ int main(int argc, char **argv){
 	binlogs = new BinlogQueue(data_db, binlog_db, opt.binlog_capacity, true);
 
 	Options default_options;
-	status = db_open(default_options, meta_dir, &meta_db);
-	if(!status.ok()){
+	default_options.binlog = false;
+	meta_db = SSDB::open(default_options, meta_dir);
+	if(!meta_db){
 		fprintf(stderr, "ERROR: open leveldb meta: %s error!\n", meta_dir.c_str());
 		exit(1);
 	}
