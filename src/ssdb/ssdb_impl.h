@@ -57,6 +57,7 @@ public:
 
 	//void flushdb();
 	virtual uint64_t size(std::string start="", std::string end="");
+	virtual uint64_t binlog_size(std::string start="", std::string end="");
 	virtual std::vector<std::string> info();
 	virtual void compact();
 	virtual int key_range(std::vector<std::string> *keys);
@@ -171,6 +172,7 @@ private:
 	int _qpop(const Bytes &name, std::string *item, uint64_t front_or_back_seq, char log_type=BinlogType::SYNC);
 	int64_t _qpush_uncommit(const Bytes &name, const Bytes &item, uint64_t front_or_back_seq, bool need_exist, char log_type=BinlogType::SYNC);
 	int _qpop_uncommit(const Bytes &name, std::string *item, uint64_t front_or_back_seq, char log_type=BinlogType::SYNC);
+	uint64_t db_size(leveldb::DB *db, std::string start, std::string end);
 };
 
 #endif

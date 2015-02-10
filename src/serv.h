@@ -28,6 +28,10 @@ private:
 	void start_fsync_thread();
 	void stop_fsync_thread();
 	static void* backend_fsync(void *arg);
+
+	void start_compact_thread();
+	void stop_compact_thread();
+	static void* backend_compact(void *arg);
 	
 	std::string kv_range_s;
 	std::string kv_range_e;
@@ -35,8 +39,12 @@ private:
 	SSDB *meta;
 
 	// for fsync
-	bool fsync_thread_quit;
+	volatile bool fsync_thread_quit;
 	pthread_t fsync_tid;
+
+	// for compact
+	volatile bool compact_thread_quit;
+	pthread_t compact_tid;
 
 public:
 	SSDBImpl *ssdb;
@@ -50,6 +58,12 @@ public:
 
 	// for fsync
 	int fsync_period;
+
+	// last compact time
+	uint64_t last_compact; // second
+	int compact_hour_everyday; // hour every day
+
+	std::string role; // master or slave
 
 	SSDBServer(SSDB *ssdb, SSDB *meta, Config *conf, const std::string &conf_path, NetworkServer *net);
 	~SSDBServer();

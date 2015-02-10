@@ -301,7 +301,6 @@ int BackendSync::Client::copy(){
 		}else if(data_type == DataType::ZSET){
 			cmd = BinlogCommand::ZSET;
 		}else if(data_type == DataType::QUEUE){
-            // FIXME has bug?
 			cmd = BinlogCommand::QPUSH_BACK;
 		}else{
 			continue;

@@ -28,6 +28,7 @@ public:
 
 	//void flushdb();
 	virtual uint64_t size(std::string start="", std::string end="") = 0;
+	virtual uint64_t binlog_size(std::string start="", std::string end="") = 0;
 	virtual std::vector<std::string> info() = 0;
 	virtual void compact() = 0;
 	virtual int key_range(std::vector<std::string> *keys) = 0;

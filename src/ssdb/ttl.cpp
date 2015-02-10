@@ -11,12 +11,14 @@ found in the LICENSE file.
 
 #define EXPIRATION_LIST_KEY "\xff\xff\xff\xff\xff|EXPIRE_LIST|KV"
 #define BATCH_SIZE    1000
+#define ADVANCE_READ_TTL    2
 
 ExpirationHandler::ExpirationHandler(SSDB *ssdb){
 	this->ssdb = ssdb;
 	this->thread_quit = false;
 	this->list_name = EXPIRATION_LIST_KEY;
 	this->first_timeout = 0;
+	this->enable = false;
 	this->start();
 }
 
@@ -58,12 +60,17 @@ int ExpirationHandler::set_ttl(const Bytes &key, int64_t ttl){
 	if(ret == -1){
 		return -1;
 	}
+
+	if(!this->enable){
+	    return 0;
+	}
+
 	if(expired < first_timeout){
 		first_timeout = expired;
 	}
 	std::string s_key = key.String();
 	fast_keys.del(s_key);
-	if(fast_keys.empty() || expired <= fast_keys.max_score()){
+	if(expired <= fast_keys.max_score()){
 		fast_keys.add(s_key, expired);
 		if(fast_keys.size() > BATCH_SIZE){
 			log_debug("pop_back");
@@ -91,9 +98,15 @@ int64_t ExpirationHandler::get_ttl(const Bytes &key){
 	return -1;
 }
 
-void ExpirationHandler::load_expiration_keys_from_db(int num){
+void ExpirationHandler::load_expiration_keys_from_db(int64_t expired, int num){
+	char data[30];
+	int size = snprintf(data, sizeof(data), "%" PRId64, expired);
+	if(size <= 0){
+		size = 0;
+	}
+
 	ZIterator *it;
-	it = ssdb->zscan(this->list_name, "", "", "", num);
+	it = ssdb->zscan(this->list_name, "", "", Bytes(data,size), num);
 	int n = 0;
 	while(it->next()){
 		n ++;
@@ -101,6 +114,7 @@ void ExpirationHandler::load_expiration_keys_from_db(int num){
 		int64_t score = str_to_int64(it->score);
 		if(score < 2000000000){
 			// older version compatible
+			// TODO 新老版本共存的时候，这个会有一些bug 
 			score *= 1000;
 		}
 		fast_keys.add(key, score);
@@ -112,21 +126,38 @@ void ExpirationHandler::load_expiration_keys_from_db(int num){
 void* ExpirationHandler::thread_func(void *arg){
 	ExpirationHandler *handler = (ExpirationHandler *)arg;
 	
+	int64_t last_load_empty_times = 0;
 	while(!handler->thread_quit){
 		SSDB *ssdb = handler->ssdb;
 		if(!ssdb){
 			break;
 		}
-		if(handler->first_timeout > time_ms()){
+		if(!handler->enable){
 			usleep(10 * 1000);
 			continue;
 		}
-		
+		int64_t current = time_ms();
+		if(handler->fast_keys.empty() && (current - last_load_empty_times) < ADVANCE_READ_TTL * 1000){
+			usleep(10 * 1000);
+			continue;
+		}
+		if(!handler->fast_keys.empty() && handler->first_timeout > current){
+			usleep(10 * 1000);
+			continue;
+		}
 		{
 			Locking l(&handler->mutex);
+			if(!handler->enable){
+			    continue;
+			}
+            // TOODO 增加最大值的限制
 			if(handler->fast_keys.empty()){
-				handler->load_expiration_keys_from_db(BATCH_SIZE);
+				int64_t expired = current + ADVANCE_READ_TTL * 1000;
+				handler->load_expiration_keys_from_db(expired, BATCH_SIZE);
 				handler->first_timeout = INT64_MAX;
+				if(handler->fast_keys.empty()) {
+				    last_load_empty_times = current;
+				}
 			}
 		
 			int64_t score;
@@ -134,7 +165,7 @@ void* ExpirationHandler::thread_func(void *arg){
 			if(handler->fast_keys.front(&key, &score)){
 				handler->first_timeout = score;
 				
-				if(score <= time_ms()){
+				if(score <= current){
 					log_debug("expired %s", key.c_str());
 					ssdb->del(key);
 					ssdb->zdel(handler->list_name, key);
@@ -148,3 +179,14 @@ void* ExpirationHandler::thread_func(void *arg){
 	handler->thread_quit = false;
 	return (void *)NULL;
 }
+
+void ExpirationHandler::set_enable(bool is_enable) {
+	if(is_enable) {
+        this->enable = true;
+	} else {
+        Locking l(&this->mutex);
+        this->enable = false;
+        while(this->fast_keys.pop_front()!= 0){};
+	}
+}
+

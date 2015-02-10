@@ -57,7 +57,6 @@ Command* ProcMap::get_proc(const Bytes &str){
 	return NULL;
 }
 
-// FIXME 待性能优化，pattern被多次解析
 /*
  * support pattern:
  *      string 
@@ -68,49 +67,66 @@ Command* ProcMap::get_proc(const Bytes &str){
  *  Return:
  *      true is match, false is not match.
  */
-bool is_pattern_match(const std::string &source, std::string pattern) {
-    if (pattern.empty()) {
-        return false;
-    }
-
-    bool is_match_all = true;
-    for (int i = 0; i < pattern.size(); i ++) {
-        if (pattern.at(i) != '*') {
-            is_match_all = false;
-            break;
-        }
-    }
-
-    if (is_match_all) {
-        return true;
-    }
-
-    bool prefix_not_pattern = (pattern.at(0) != '*');
-    bool suffix_not_pattern = (pattern.at(pattern.size()-1) != '*');
-
-    std::string::size_type startpos = 0;  
-    while (startpos!= std::string::npos){
-        startpos = pattern.find('*');
-        if(startpos != std::string::npos){ 
-          pattern.replace(startpos,1,"");
-        }
-    } 
-
+bool is_pattern_match(const std::string &source, std::string &pattern, bool prefix_fuzzy_match, bool suffix_fuzzy_match) {
     if (source.size() < pattern.size()) {
         return false;
     }
 
-    if (prefix_not_pattern && suffix_not_pattern) {
+    // check if equal
+    if (!prefix_fuzzy_match && !suffix_fuzzy_match) {
         return source.compare(pattern) == 0;
     }
 
-    if (prefix_not_pattern) {
+    // check if prefix match
+    if (!prefix_fuzzy_match) {
         return pattern.compare(source.substr(0,pattern.size())) == 0;
     }
 
-    if (suffix_not_pattern) {
+    // check if suffix match
+    if (!suffix_fuzzy_match) {
         return pattern.compare(source.substr(source.size()-pattern.size(),pattern.size())) == 0;
     }
 
+    // check if contain
     return source.find(pattern) != std::string::npos;
+}
+
+/*
+ * parse pattern:
+ *      string 
+ *      string*  (prefix match)
+ *      *string  (suffix match)
+ *      *string* (fuzzy match)
+ *
+ * param and return:
+ *      if patten is "*" or "", match_all is true, and then return
+ *      if patten is startwith "*", prefix_fuzzy_match is true
+ *      if patten is endwith "*", suffix_fuzzy_match is true
+ */
+void parse_scan_pattern(const std::string &source_pattern, std::string &pattern, bool &match_all, bool &prefix_fuzzy_match, bool &suffix_fuzzy_match) {
+    pattern = source_pattern;
+    match_all = true;
+    if (pattern.empty()) {
+        return;
+    }
+
+    for (int i = 0; i < pattern.size(); i ++) {
+        if (pattern.at(i) != '*') {
+            match_all = false;
+            break;
+        }
+    }
+
+    if (match_all) {
+        return;
+    }
+
+    prefix_fuzzy_match = (pattern.at(0) == '*');
+    suffix_fuzzy_match = (pattern.at(pattern.size()-1) == '*');
+
+    std::string::size_type startpos = pattern.find('*');
+    while (startpos != std::string::npos){
+        pattern.replace(startpos,1,"");
+        startpos = pattern.find('*');
+    } 
 }

@@ -26,6 +26,10 @@ static const std::string SLAVE_STATUS_RANGE_END = "slave.statut.";
 
 static const std::string FSYNC_KEY = "SSDB.KEY.FOR.FSYNC.DATA.AND.BINLOG";
 
+// node type
+static const std::string ROLE_MASTER = "master";
+static const std::string ROLE_SLAVE = "slave";
+
 class DataType{
 public:
 	static const char SYNCLOG	= 1;

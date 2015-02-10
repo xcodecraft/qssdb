@@ -263,6 +263,14 @@ int Config::get_num(const char *key) const{
 	return c->num();
 }
 
+int Config::get_num(const char *key, int default_val) const{
+	const Config *c = this->get(key);
+	if(!c){
+		return default_val;
+	}
+	return c->num();
+}
+
 const char* Config::get_str(const char *key) const{
 	const Config *c = this->get(key);
 	if(!c){

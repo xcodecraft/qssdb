@@ -1,3 +1,11 @@
+* 1.8.0.10
+	* New features:
+		- Fix TTL bug
+		- Add Node Role support
+		- Add stats item
+		- Add Timer for compact
+		- Optimization redis scan/hscan/sscan/zscan match pattern
+
 * 1.8.0.9
 	* New features:
 		- Fix ssdb-dump hset bug

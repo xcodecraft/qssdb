@@ -167,6 +167,18 @@ int SSDBImpl::raw_get(const Bytes &key, std::string *val){
 }
 
 uint64_t SSDBImpl::size(std::string start, std::string end){
+	return this->db_size(db, start, end);
+}
+
+uint64_t SSDBImpl::binlog_size(std::string start, std::string end){
+	if (binlog_db == NULL) {
+        return 0;
+	}
+
+	return this->db_size(binlog_db, start, end);
+}
+
+uint64_t SSDBImpl::db_size(leveldb::DB *db, std::string start, std::string end){
 	std::string s = "A";
 	std::string e(1, 'z' + 1);
     if (!start.empty()) {

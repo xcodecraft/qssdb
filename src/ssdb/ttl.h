@@ -25,6 +25,8 @@ public:
 	// I stick to Redis 2.6
 	int64_t get_ttl(const Bytes &key);
 
+	void set_enable(bool is_enable);
+
 private:
 	SSDB *ssdb;
 	volatile bool thread_quit;
@@ -32,10 +34,12 @@ private:
 	int64_t first_timeout;
 	SortedSet fast_keys;
 
+	volatile bool enable;
+
 	void start();
 	void stop();
 	static void* thread_func(void *arg);
-	void load_expiration_keys_from_db(int num);
+	void load_expiration_keys_from_db(int64_t expired, int num);
 };
 
 #endif

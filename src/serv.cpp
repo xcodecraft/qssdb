@@ -300,21 +300,33 @@ void SSDBServer::reg_procs(NetworkServer *net){
 SSDBServer::SSDBServer(SSDB *ssdb, SSDB *meta, Config *conf, const std::string &conf_path, NetworkServer *net):conf(conf),conf_path(conf_path){
 	this->ssdb = (SSDBImpl *)ssdb;
 	this->meta = meta;
+	this->last_compact = 0;
 
 	net->data = this;
 	this->reg_procs(net);
+
+	this->role = conf->get_str("server.role");
+	if (this->role != ROLE_MASTER && this->role != ROLE_SLAVE){
+		log_fatal("config role %s error! must be master or slave!", this->role.c_str());
+		fprintf(stderr,"config role %s error! must be master or slave!\n", this->role.c_str());
+		exit(1);
+	}
 
 	this->fsync_period = conf->get_num("server.fsync_period");
 	if (this->fsync_period <= 0) {
 	    this->fsync_period = CONFIG_SERVER_FSYNC_PERIOD;
 	}
 
+	this->compact_hour_everyday = conf->get_num("server.compact_hour_everyday", -1);
+
 	int sync_speed = conf->get_num("replication.sync_speed");
 
 	backend_dump = new BackendDump(this->ssdb);
 	backend_sync = new BackendSync(this->ssdb, sync_speed);
 	expiration = new ExpirationHandler(this->ssdb);
+	expiration->set_enable(this->role == ROLE_MASTER);
 	this->start_fsync_thread();
+	this->start_compact_thread();
 
     {
         int port = conf->get_num("server.port"); 
@@ -364,12 +376,14 @@ SSDBServer::SSDBServer(SSDB *ssdb, SSDB *meta, Config *conf, const std::string &
 	int ret = this->get_kv_range(&this->kv_range_s, &this->kv_range_e);
 	if(ret == -1){
 		log_fatal("load key_range failed!");
+		fprintf(stderr,"load key_range failed!\n");
 		exit(1);
 	}
 
     ret = load_kv_stats();
 	if(ret == -1){
 		log_fatal("load kv_stats failed!");
+		fprintf(stderr,"load kv_stats failed!\n");
 		exit(1);
 	}
 
@@ -389,6 +403,7 @@ SSDBServer::~SSDBServer(){
 	delete expiration;
 
 	this->stop_fsync_thread();
+	this->stop_compact_thread();
 
 	log_debug("SSDBServer finalized");
 }
@@ -603,6 +618,7 @@ int proc_sync140(NetworkServer *net, Link *link, const Request &req, Response *r
 int proc_compact(NetworkServer *net, Link *link, const Request &req, Response *resp){
 	SSDBServer *serv = (SSDBServer *)net->data;
 	serv->ssdb->compact();
+	serv->last_compact = (uint64_t)millitime();
 	resp->push_back("ok");
 	return 0;
 }
@@ -730,8 +746,16 @@ int proc_info_base(NetworkServer *net, Link *link, const Request &req, Response 
 	}
 	
 	{
+		resp->push_back("role:" + serv->role);
+
 		uint64_t size = serv->ssdb->size();
+		uint64_t binlog_size = serv->ssdb->binlog_size();
 		resp->push_back("dbsize:" + str(size));
+		resp->push_back("binlog_size:" + str(binlog_size));
+
+		uint64_t last_compact = (uint64_t)millitime() - serv->last_compact;
+		resp->push_back("last_compact:" + str(last_compact));
+
         std::string kv_start(1,DataType::KV-1);
         std::string kv_end(1,DataType::KV+1);
 		uint64_t kv_total_size = serv->ssdb->size(kv_start,kv_end);
@@ -986,6 +1010,8 @@ static int proc_config_rewrite(NetworkServer *net, Link *link, const Request &re
 static int proc_config_set(NetworkServer *net, Link *link, const Request &req, Response *resp);
 static int proc_config_get(NetworkServer *net, Link *link, const Request &req, Response *resp);
 
+// TODO 待重构: 
+//   config 因为受限与原本ssdb的conf的规则，同时考虑合并官网ssdb的便捷性，所以目前也只是以一种比较恶心的方式实现，但是维护性存在着问题   
 int proc_config(NetworkServer *net, Link *link, const Request &req, Response *resp){
     CHECK_NUM_PARAMS(2);
 
@@ -1071,6 +1097,14 @@ static int proc_config_set(NetworkServer *net, Link *link, const Request &req, R
 
         net->client_output_limit = val;
         serv->conf->set(name.c_str(), req[3].String().c_str());
+    } else if (name == "server.compact_hour_everyday") {
+        int64_t val = req[3].Int64();
+        if (errno != 0) {
+            goto client_err;
+        }
+
+        serv->compact_hour_everyday = val;
+        serv->conf->set(name.c_str(), req[3].String().c_str());
     } else if (name == "server.allow" || name == "server.deny") {
         std::string val = req[3].String();
         std::vector<std::string> ips;
@@ -1101,6 +1135,17 @@ static int proc_config_set(NetworkServer *net, Link *link, const Request &req, R
             net->readonly = false;
         }
         serv->conf->set(name.c_str(), req[3].String().c_str());
+    } else if (name == "server.role") {
+        std::string new_role = req[3].String();
+        if (new_role != ROLE_MASTER && new_role != ROLE_SLAVE){
+            goto client_err;
+        }
+
+        if (new_role != serv->role) {
+            serv->role = new_role;
+            serv->expiration->set_enable(new_role == ROLE_MASTER);
+            serv->conf->set(name.c_str(), new_role.c_str());
+        }
     } else if (name == "server.auth") {
 		std::string password = req[3].String();
 		if(password.empty()){
@@ -1131,8 +1176,6 @@ client_err:
     return 0;
 }
 
-#define CONFIG_GET_STR(val, default_val) ((val != NULL && val[0] != '\0')? val : default_val)
-#define CONFIG_GET_NUM(val, default_val) (val <= 0 ? default_val : val)
 static int proc_config_get(NetworkServer *net, Link *link, const Request &req, Response *resp) {
     CHECK_NUM_PARAMS(3);
 
@@ -1175,12 +1218,15 @@ static int proc_config_get(NetworkServer *net, Link *link, const Request &req, R
             }
         }
     } else {
+        #define CONFIG_GET_STR(val, default_val) ((val != NULL && val[0] != '\0')? val : default_val)
+        #define CONFIG_GET_NUM(val, default_val) (val <= 0 ? default_val : val)
         //get all config
         resp->push_back(str("work_dir:")+CONFIG_GET_STR(serv->conf->get_str("work_dir"),CONFIG_WORK_DIR));
         resp->push_back(str("pidfile:")+CONFIG_GET_STR(serv->conf->get_str("pidfile"),""));
         
         resp->push_back(str("server.ip:")+CONFIG_GET_STR(serv->conf->get_str("server.ip"),CONFIG_SERVER_IP));
         resp->push_back(str("server.port:")+str(CONFIG_GET_NUM(serv->conf->get_num("server.port"),0)));
+        resp->push_back(str("server.role:")+serv->conf->get_str("server.role"));
         resp->push_back(str("server.allow:")+CONFIG_GET_STR(serv->conf->get_str("server.allow"),""));
         resp->push_back(str("server.deny:")+CONFIG_GET_STR(serv->conf->get_str("server.deny"),""));
         resp->push_back(str("server.max_connections:")+str(CONFIG_GET_NUM(serv->conf->get_num("server.max_connections"),CONFIG_SERVER_MAX_CONNECTIONS)));
@@ -1189,6 +1235,7 @@ static int proc_config_get(NetworkServer *net, Link *link, const Request &req, R
         resp->push_back(str("server.readonly:")+CONFIG_GET_STR(serv->conf->get_str("server.readonly"),CONFIG_SERVER_READONLY));
         resp->push_back(str("server.slow_time:")+str(CONFIG_GET_NUM(serv->conf->get_num("server.slow_time"),CONFIG_SERVER_SLOW_TIME)));
         resp->push_back(str("server.fsync_period:")+str(CONFIG_GET_NUM(serv->conf->get_num("server.fsync_period"),CONFIG_SERVER_FSYNC_PERIOD)));
+        resp->push_back(str("server.compact_hour_everyday:")+str(serv->conf->get_num("server.compact_hour_everyday",-1)));
 
         resp->push_back(str("replication.binlog:")+str(CONFIG_GET_STR(serv->conf->get_str("replication.binlog"),CONFIG_REPLICATION_BINLOG)));
         resp->push_back(str("replication.binlog_capacity:")+str(CONFIG_GET_NUM(serv->conf->get_num("replication.binlog_capacity"),CONFIG_BINLOG_CAPACITY)));
@@ -1441,10 +1488,14 @@ int proc_redis_scan(NetworkServer *net, Link *link, const Request &req, Response
 }
 
 static int kv_scan(SSDBServer *serv, std::string &cursor_key, const std::string &pattern, bool use_pattern, int count, std::vector<std::string> *result) {
+    std::string pattern_parsed;
+    bool match_all, prefix_fuzzy_match, suffix_fuzzy_match;
+    parse_scan_pattern(pattern, pattern_parsed, match_all, prefix_fuzzy_match, suffix_fuzzy_match);
+
     int result_count = 0;
     KIterator *it = serv->ssdb->scan(cursor_key, "", count);
     while(it->next()){
-        if (!use_pattern || is_pattern_match(it->key, pattern)) {
+        if (!use_pattern || match_all || is_pattern_match(it->key, pattern_parsed, prefix_fuzzy_match, suffix_fuzzy_match)) {
             result->push_back(it->key);
         }
         cursor_key = it->key;
@@ -1455,10 +1506,14 @@ static int kv_scan(SSDBServer *serv, std::string &cursor_key, const std::string 
 }
 
 static int hash_scan(SSDBServer *serv, const std::string &name, std::string &cursor_key, const std::string &pattern, bool use_pattern, int count, std::vector<std::string> *result, int type) {
+    std::string pattern_parsed;
+    bool match_all, prefix_fuzzy_match, suffix_fuzzy_match;
+    parse_scan_pattern(pattern, pattern_parsed, match_all, prefix_fuzzy_match, suffix_fuzzy_match);
+
     int result_count = 0;
     HIterator *it = serv->ssdb->hscan(name, cursor_key, "", count);
     while(it->next()){
-        if (!use_pattern || is_pattern_match(it->key, pattern)) {
+        if (!use_pattern || match_all || is_pattern_match(it->key, pattern_parsed, prefix_fuzzy_match, suffix_fuzzy_match)) {
             result->push_back(it->key);
             if (type == REDIS_HSCAN) {
                 result->push_back(it->val);
@@ -1472,10 +1527,14 @@ static int hash_scan(SSDBServer *serv, const std::string &name, std::string &cur
 }
 
 static int zset_scan(SSDBServer *serv, const std::string &name, std::string &cursor_key, std::string &cursor_score, const std::string &pattern, bool use_pattern, int count, std::vector<std::string> *result) {
+    std::string pattern_parsed;
+    bool match_all, prefix_fuzzy_match, suffix_fuzzy_match;
+    parse_scan_pattern(pattern, pattern_parsed, match_all, prefix_fuzzy_match, suffix_fuzzy_match);
+
     int result_count = 0;
     ZIterator *it = serv->ssdb->zscan(name, cursor_key, cursor_score, "", count);
     while(it->next()){
-        if (!use_pattern || is_pattern_match(it->key, pattern)) {
+        if (!use_pattern || match_all || is_pattern_match(it->key, pattern_parsed, prefix_fuzzy_match, suffix_fuzzy_match)) {
             result->push_back(it->key);
             result->push_back(it->score);
         }
@@ -1528,7 +1587,8 @@ void SSDBServer::start_fsync_thread(){
 	int err = pthread_create(&fsync_tid, NULL, &this->backend_fsync, this);
 	if(err != 0){
 		log_fatal("can't create fsync thread: %s", strerror(err));
-		exit(0);
+		fprintf(stderr, "can't create fsync thread: %s\n", strerror(err));
+		exit(1);
 	}
 	log_info("start backend_fsync thread, tid: %ld", fsync_tid);
 }
@@ -1562,6 +1622,62 @@ void* SSDBServer::backend_fsync(void *arg){
         log_debug("backend_fsync thread fsync %lld times", ++fsync_count);
 	}
 	log_info("backend_fsync thread quit!");
+	
+	return (void *)NULL;
+}
+
+// TODO 目前这种粗放式的线程模式存在问题，每来一个block功能就创建一个线程? 
+// 明显不利于管理, 还是把这些后台任务作为task，然后主线程基于事件发生时间点触发对应的task，然后由后台统一调度管理更好一些，需要重构下这些代码。   
+void SSDBServer::start_compact_thread(){
+	compact_thread_quit = false;
+	int err = pthread_create(&compact_tid, NULL, &this->backend_compact, this);
+	if(err != 0){
+		log_fatal("can't create compact thread: %s", strerror(err));
+		fprintf(stderr,"can't create compact thread: %s\n", strerror(err));
+		exit(1);
+	}
+	log_info("start backend_compact thread, tid: %ld", compact_tid);
+}
+
+void SSDBServer::stop_compact_thread(){
+	compact_thread_quit = true;
+	void *tret;
+	int err = pthread_join(compact_tid, &tret);
+    if(err != 0){
+		log_error("can't join compact thread: %s", strerror(err));
+	}
+}
+
+void* SSDBServer::backend_compact(void *arg){
+	SSDBServer *serv = (SSDBServer *)arg;
+	int sleep_times = 0;
+    
+	while(!serv->compact_thread_quit){
+        if(--sleep_times >= 0) {
+            usleep(100 * 1000);
+            continue;
+        }
+
+        time_t time;
+        struct timeval tv;
+        struct tm *tm;
+        gettimeofday(&tv, NULL);
+        time = tv.tv_sec;
+        tm = localtime(&time);
+        if(tm->tm_hour != serv->compact_hour_everyday || ((int64_t)tv.tv_sec - serv->last_compact < 3600)) {
+            sleep_times = 10;
+            continue;
+        }
+
+        // compact
+        serv->ssdb->compact();
+        serv->last_compact = (int64_t)tv.tv_sec;
+
+        log_info("backend_compact finish");
+        sleep_times = 10 * 3600; // sleep 1 hour
+	}
+
+	log_info("backend_compact thread quit!");
 	
 	return (void *)NULL;
 }

@@ -78,6 +78,7 @@ class Config{
 		Config* add_child(const char *key, const char *val="", int lineno=0);
 		int num() const;
 		int get_num(const char *key) const;
+		int get_num(const char *key, int default_val) const;
 		const char* str() const;
 		const char* get_str(const char *key) const;
         

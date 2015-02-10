@@ -29,7 +29,9 @@ typedef std::vector<Bytes> Request;
 typedef int (*proc_t)(NetworkServer *net, Link *link, const Request &req, Response *resp);
 
 int proc_redis_scan(NetworkServer *net, Link *link, const Request &req, Response *resp, const int type);
-bool is_pattern_match(const std::string &source, const std::string pattern);
+
+bool is_pattern_match(const std::string &source, std::string &pattern, bool prefix_fuzzy_match, bool suffix_fuzzy_match);
+void parse_scan_pattern(const std::string &source, std::string &pattern, bool &match_all, bool &prefix_fuzzy_match, bool &suffix_fuzzy_match) ;
 
 struct Command{
 	static const int FLAG_READ		= (1 << 0);
