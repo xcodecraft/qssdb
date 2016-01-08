@@ -36,11 +36,11 @@ echo $resp; // output: 123
 ## Compile and Install
 
 ```sh
-$ wget --no-check-certificate https://github.com/ideawu/ssdb/archive/master.zip
+$ wget --no-check-certificate https://github.com/xcodecraft/qssdb/archive/master.zip
 $ unzip master
 $ cd ssdb-master
 $ make
-$ #optional, install ssdb in /usr/local/ssdb
+$ #optional, install ssdb in /usr/local/ssdb (mv ssdb qssdb-1.8.0.11, ln -s qssdb-1.8.0.11 ssdb)
 $ sudo make install
 
 # start master
@@ -137,6 +137,10 @@ SSDB is licensed under [New BSD License](http://opensource.org/licenses/BSD-3-Cl
 ## Authors
 
 @ideawu
+
+## qssdb Contributors
+
+@maijunsheng, @sunxiaojun, @yangwm 
 
 ## Thanks
 
